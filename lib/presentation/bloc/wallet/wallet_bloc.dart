@@ -1,6 +1,10 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:my_btcz_wallet/core/crypto/crypto_service.dart';
+import 'package:my_btcz_wallet/core/network/electrum_service.dart';
 import 'package:my_btcz_wallet/data/datasources/wallet_local_data_source.dart';
+import 'package:my_btcz_wallet/data/models/wallet_model.dart';
+import 'package:my_btcz_wallet/domain/entities/wallet.dart';
 import 'package:my_btcz_wallet/domain/usecases/create_wallet.dart';
 import 'package:my_btcz_wallet/domain/usecases/get_balance.dart';
 import 'package:my_btcz_wallet/domain/usecases/get_transactions.dart';
@@ -15,8 +19,10 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
   final GetTransactions getTransactions;
   final CryptoService cryptoService;
   final WalletLocalDataSource localDataSource;
+  final ElectrumService electrumService;
   String? _pendingMnemonic;
   String? _pendingNotes;
+  StreamSubscription? _connectionSubscription;
 
   WalletBloc({
     required this.createWallet,
@@ -25,6 +31,7 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
     required this.getTransactions,
     required this.cryptoService,
     required this.localDataSource,
+    required this.electrumService,
   }) : super(WalletInitial()) {
     on<CreateWalletEvent>(_onCreateWallet);
     on<RestoreWalletEvent>(_onRestoreWallet);
@@ -33,6 +40,26 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
     on<GetTransactionsEvent>(_onGetTransactions);
     on<GenerateMnemonicEvent>(_onGenerateMnemonic);
     on<VerifyMnemonicEvent>(_onVerifyMnemonic);
+    on<UpdateConnectionStatus>(_onUpdateConnectionStatus);
+    on<ConnectToServer>(_onConnectToServer);
+
+    // Listen to connection status changes
+    _connectionSubscription = electrumService.statusStream.listen((status) {
+      add(UpdateConnectionStatus(status));
+    });
+  }
+
+  WalletModel _convertToModel(Wallet wallet) {
+    return WalletModel(
+      address: wallet.address,
+      balance: wallet.balance,
+      transactions: wallet.transactions,
+      isInitialized: wallet.isInitialized,
+      privateKey: wallet.privateKey,
+      publicKey: wallet.publicKey,
+      mnemonic: wallet.mnemonic,
+      notes: wallet.notes,
+    );
   }
 
   Future<void> _onCreateWallet(
@@ -51,7 +78,9 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
       (wallet) {
         _pendingMnemonic = null;
         _pendingNotes = null;
-        emit(WalletCreated(wallet));
+        final walletModel = _convertToModel(wallet);
+        emit(WalletCreated(walletModel));
+        electrumService.connect(); // Connect after wallet creation
       },
     );
   }
@@ -67,7 +96,11 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
     ));
     result.fold(
       (failure) => emit(WalletError(failure.message)),
-      (wallet) => emit(WalletRestored(wallet)),
+      (wallet) {
+        final walletModel = _convertToModel(wallet);
+        emit(WalletRestored(walletModel));
+        electrumService.connect(); // Connect after wallet restoration
+      },
     );
   }
 
@@ -80,6 +113,7 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
       final wallet = await localDataSource.getWallet();
       if (wallet != null) {
         emit(WalletLoaded(wallet));
+        electrumService.connect(); // Connect after wallet load
       } else {
         emit(WalletInitial());
       }
@@ -147,5 +181,28 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
     } catch (e) {
       emit(WalletError('Failed to verify mnemonic: $e'));
     }
+  }
+
+  void _onUpdateConnectionStatus(
+    UpdateConnectionStatus event,
+    Emitter<WalletState> emit,
+  ) {
+    final currentState = state;
+    if (currentState is WalletLoaded) {
+      emit(currentState.copyWith(connectionStatus: event.status));
+    }
+  }
+
+  void _onConnectToServer(
+    ConnectToServer event,
+    Emitter<WalletState> emit,
+  ) {
+    electrumService.connect();
+  }
+
+  @override
+  Future<void> close() {
+    _connectionSubscription?.cancel();
+    return super.close();
   }
 }

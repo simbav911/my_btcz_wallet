@@ -29,6 +29,7 @@ dependencies:
   # Networking
   dio: ^5.4.1
   ssl_pinning_plugin: ^2.0.0
+  connectivity_plus: ^4.0.2
   
   # Cryptography
   bip39: ^1.0.6

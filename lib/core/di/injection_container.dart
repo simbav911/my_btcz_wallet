@@ -28,6 +28,7 @@ Future<void> init() async {
       getTransactions: sl(),
       cryptoService: sl(),
       localDataSource: sl(),
+      electrumService: sl(), // Add ElectrumService to WalletBloc
     ),
   );
 
@@ -60,8 +61,9 @@ Future<void> init() async {
   );
 
   //! Core
-  sl.registerLazySingleton(() => CryptoService());
+  // Create ElectrumService as singleton to maintain single connection
   sl.registerLazySingleton(() => ElectrumService());
+  sl.registerLazySingleton(() => CryptoService());
   sl.registerLazySingleton(
     () => TransactionService(
       cryptoService: sl(),
