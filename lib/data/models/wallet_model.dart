@@ -6,19 +6,20 @@ class WalletModel extends Wallet {
     required double balance,
     required List<String> transactions,
     required bool isInitialized,
-    required this.privateKey,
-    required this.publicKey,
-    required this.mnemonic,
+    required String privateKey,
+    required String publicKey,
+    required String mnemonic,
+    String? notes,
   }) : super(
           address: address,
           balance: balance,
           transactions: transactions,
           isInitialized: isInitialized,
+          privateKey: privateKey,
+          publicKey: publicKey,
+          mnemonic: mnemonic,
+          notes: notes,
         );
-
-  final String privateKey;
-  final String publicKey;
-  final String mnemonic;
 
   factory WalletModel.fromJson(Map<String, dynamic> json) {
     return WalletModel(
@@ -29,6 +30,7 @@ class WalletModel extends Wallet {
       privateKey: json['privateKey'] as String,
       publicKey: json['publicKey'] as String,
       mnemonic: json['mnemonic'] as String,
+      notes: json['notes'] as String?,
     );
   }
 
@@ -41,6 +43,7 @@ class WalletModel extends Wallet {
       'privateKey': privateKey,
       'publicKey': publicKey,
       'mnemonic': mnemonic,
+      'notes': notes,
     };
   }
 
@@ -52,6 +55,7 @@ class WalletModel extends Wallet {
     String? privateKey,
     String? publicKey,
     String? mnemonic,
+    String? notes,
   }) {
     return WalletModel(
       address: address ?? this.address,
@@ -61,6 +65,7 @@ class WalletModel extends Wallet {
       privateKey: privateKey ?? this.privateKey,
       publicKey: publicKey ?? this.publicKey,
       mnemonic: mnemonic ?? this.mnemonic,
+      notes: notes ?? this.notes,
     );
   }
 }

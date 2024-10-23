@@ -5,11 +5,11 @@ class AppConstants {
 
   // Network
   static const List<String> electrumServers = [
-    'electrum1.btcz.rocks:5002',
-    'electrum2.btcz.rocks:5002',
-    'electrum3.btcz.rocks:5002',
-    'electrum4.btcz.rocks:5002',
-    'electrum5.btcz.rocks:5002',
+    'electrum1.btcz.rocks:50002',
+    'electrum2.btcz.rocks:50002',
+    'electrum3.btcz.rocks:50002',
+    'electrum4.btcz.rocks:50002',
+    'electrum5.btcz.rocks:50002',
   ];
 
   // Storage Keys

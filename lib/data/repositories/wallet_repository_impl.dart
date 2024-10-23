@@ -21,7 +21,7 @@ class WalletRepositoryImpl implements WalletRepository {
   });
 
   @override
-  Future<Either<Failure, Wallet>> createWallet() async {
+  Future<Either<Failure, Wallet>> createWallet({String? notes}) async {
     try {
       WalletLogger.info('Creating new wallet...');
       final mnemonic = cryptoService.generateMnemonic();
@@ -47,6 +47,7 @@ class WalletRepositoryImpl implements WalletRepository {
         privateKey: HEX.encode(privateKey),
         publicKey: HEX.encode(publicKey),
         mnemonic: mnemonic,
+        notes: notes ?? '',
       );
 
       await localDataSource.saveWallet(wallet);
@@ -62,7 +63,7 @@ class WalletRepositoryImpl implements WalletRepository {
   }
 
   @override
-  Future<Either<Failure, Wallet>> restoreWallet(String mnemonic) async {
+  Future<Either<Failure, Wallet>> restoreWallet(String mnemonic, {String? notes}) async {
     try {
       WalletLogger.info('Restoring wallet from mnemonic...');
       if (!cryptoService.validateMnemonic(mnemonic)) {
@@ -93,6 +94,7 @@ class WalletRepositoryImpl implements WalletRepository {
         privateKey: HEX.encode(privateKey),
         publicKey: HEX.encode(publicKey),
         mnemonic: mnemonic,
+        notes: notes ?? '',
       );
 
       await localDataSource.saveWallet(wallet);

@@ -1,8 +1,17 @@
 import 'package:dartz/dartz.dart';
-import 'package:equatable/equatable.dart';
 import 'package:my_btcz_wallet/core/error/failures.dart';
 import 'package:my_btcz_wallet/domain/entities/wallet.dart';
 import 'package:my_btcz_wallet/domain/repositories/wallet_repository.dart';
+
+class RestoreWalletParams {
+  final String mnemonic;
+  final String? notes;
+
+  RestoreWalletParams({
+    required this.mnemonic,
+    this.notes,
+  });
+}
 
 class RestoreWallet {
   final WalletRepository repository;
@@ -10,15 +19,6 @@ class RestoreWallet {
   RestoreWallet(this.repository);
 
   Future<Either<Failure, Wallet>> call(RestoreWalletParams params) async {
-    return await repository.restoreWallet(params.mnemonic);
+    return await repository.restoreWallet(params.mnemonic, notes: params.notes);
   }
-}
-
-class RestoreWalletParams extends Equatable {
-  final String mnemonic;
-
-  const RestoreWalletParams({required this.mnemonic});
-
-  @override
-  List<Object?> get props => [mnemonic];
 }

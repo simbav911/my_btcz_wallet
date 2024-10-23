@@ -5,6 +5,7 @@ import 'package:bs58check/bs58check.dart' as bs58check;
 import 'package:crypto/crypto.dart';
 import 'package:hex/hex.dart';
 import 'package:my_btcz_wallet/core/error/failures.dart';
+import 'package:pointycastle/digests/ripemd160.dart';
 
 class CryptoService {
   // BitcoinZ specific constants
@@ -77,18 +78,19 @@ class CryptoService {
   String generateAddress(Uint8List publicKey) {
     try {
       // 1. Perform SHA-256 hashing on the public key
-      final sha256Hash = sha256.convert(publicKey);
+      final sha256Hash = Uint8List.fromList(sha256.convert(publicKey).bytes);
 
       // 2. Perform RIPEMD-160 hashing on the result
-      final ripemd160Hash = Uint8List.fromList(
-        List<int>.from(sha256Hash.bytes),
-      );
+      final ripemd160 = RIPEMD160Digest();
+      final ripemd160Hash = Uint8List(20);
+      ripemd160.update(sha256Hash, 0, sha256Hash.length);
+      ripemd160.doFinal(ripemd160Hash, 0);
 
-      // 3. Add version byte in front of RIPEMD-160 hash
-      final versionedHash = Uint8List(21);
-      versionedHash[0] = _btczP2PKHVersion >> 8;
-      versionedHash[1] = _btczP2PKHVersion & 0xFF;
-      versionedHash.setRange(2, 21, ripemd160Hash);
+      // 3. Add version bytes (0x1CB8 = [0x1C, 0xB8])
+      final versionedHash = Uint8List(22);
+      versionedHash[0] = 0x1C;
+      versionedHash[1] = 0xB8;
+      versionedHash.setRange(2, 22, ripemd160Hash);
 
       // 4. Create checksum (first 4 bytes of double SHA-256)
       final checksum = sha256
@@ -96,13 +98,16 @@ class CryptoService {
           .bytes
           .sublist(0, 4);
 
-      // 5. Append checksum to versioned hash
-      final binaryAddress = Uint8List(25);
-      binaryAddress.setRange(0, 21, versionedHash);
-      binaryAddress.setRange(21, 25, checksum);
+      // 5. Create final binary address
+      final binaryAddress = Uint8List(26);
+      binaryAddress.setRange(0, 22, versionedHash);
+      binaryAddress.setRange(22, 26, checksum);
 
       // 6. Convert to base58
-      return bs58check.encode(binaryAddress);
+      final address = bs58check.encode(binaryAddress);
+      
+      // 7. Add 't' prefix for BitcoinZ
+      return 't$address';
     } catch (e) {
       throw CryptoFailure(
         message: 'Failed to generate address: ${e.toString()}',

@@ -1,60 +1,59 @@
-import 'package:equatable/equatable.dart';
 import 'package:my_btcz_wallet/domain/entities/wallet.dart';
 
-abstract class WalletState extends Equatable {
-  const WalletState();
-
-  @override
-  List<Object?> get props => [];
-}
+abstract class WalletState {}
 
 class WalletInitial extends WalletState {}
 
 class WalletLoading extends WalletState {}
 
+class WalletError extends WalletState {
+  final String message;
+
+  WalletError(this.message);
+}
+
+class MnemonicGenerated extends WalletState {
+  final String mnemonic;
+
+  MnemonicGenerated(this.mnemonic);
+}
+
+class MnemonicVerified extends WalletState {
+  final String mnemonic;
+  final String? notes;
+
+  MnemonicVerified({
+    required this.mnemonic,
+    this.notes,
+  });
+}
+
 class WalletCreated extends WalletState {
   final Wallet wallet;
 
-  const WalletCreated(this.wallet);
-
-  @override
-  List<Object?> get props => [wallet];
+  WalletCreated(this.wallet);
 }
 
 class WalletRestored extends WalletState {
   final Wallet wallet;
 
-  const WalletRestored(this.wallet);
-
-  @override
-  List<Object?> get props => [wallet];
+  WalletRestored(this.wallet);
 }
 
-class WalletError extends WalletState {
-  final String message;
+class WalletLoaded extends WalletState {
+  final Wallet wallet;
 
-  const WalletError(this.message);
-
-  @override
-  List<Object?> get props => [message];
+  WalletLoaded(this.wallet);
 }
 
 class BalanceLoaded extends WalletState {
   final double balance;
 
-  const BalanceLoaded(this.balance);
-
-  @override
-  List<Object?> get props => [balance];
+  BalanceLoaded(this.balance);
 }
 
 class TransactionsLoaded extends WalletState {
   final List<String> transactions;
 
-  const TransactionsLoaded(this.transactions);
-
-  @override
-  List<Object?> get props => [transactions];
+  TransactionsLoaded(this.transactions);
 }
-
-class WalletBackedUp extends WalletState {}

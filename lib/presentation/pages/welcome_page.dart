@@ -4,17 +4,37 @@ import 'package:my_btcz_wallet/core/constants/app_constants.dart';
 import 'package:my_btcz_wallet/presentation/bloc/wallet/wallet_bloc.dart';
 import 'package:my_btcz_wallet/presentation/bloc/wallet/wallet_event.dart';
 import 'package:my_btcz_wallet/presentation/bloc/wallet/wallet_state.dart';
+import 'package:my_btcz_wallet/presentation/pages/create_wallet_page.dart';
 import 'package:my_btcz_wallet/presentation/pages/home_page.dart';
 
-class WelcomePage extends StatelessWidget {
+class WelcomePage extends StatefulWidget {
   const WelcomePage({super.key});
+
+  @override
+  State<WelcomePage> createState() => _WelcomePageState();
+}
+
+class _WelcomePageState extends State<WelcomePage> {
+  @override
+  void initState() {
+    super.initState();
+    context.read<WalletBloc>().add(LoadWalletEvent());
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: BlocListener<WalletBloc, WalletState>(
         listener: (context, state) {
-          if (state is WalletCreated || state is WalletRestored) {
+          if (state is MnemonicGenerated) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => CreateWalletPage(mnemonic: state.mnemonic),
+              ),
+            );
+          } else if (state is WalletCreated || 
+                     state is WalletRestored || 
+                     state is WalletLoaded) {
             Navigator.of(context).pushReplacement(
               MaterialPageRoute(
                 builder: (_) => const HomePage(),
@@ -47,7 +67,7 @@ class WelcomePage extends StatelessWidget {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: () {
-                      context.read<WalletBloc>().add(CreateWalletEvent());
+                      context.read<WalletBloc>().add(GenerateMnemonicEvent());
                     },
                     child: const Text('Create New Wallet'),
                   ),
@@ -72,17 +92,31 @@ class WelcomePage extends StatelessWidget {
 
   void _showRestoreDialog(BuildContext context) {
     final controller = TextEditingController();
+    final notesController = TextEditingController();
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Restore Wallet'),
-        content: TextField(
-          controller: controller,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'Enter your 24-word recovery phrase',
-            border: OutlineInputBorder(),
-          ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'Enter your 24-word recovery phrase',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: notesController,
+              decoration: const InputDecoration(
+                hintText: 'Notes (optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -93,7 +127,10 @@ class WelcomePage extends StatelessWidget {
             onPressed: () {
               if (controller.text.trim().isNotEmpty) {
                 context.read<WalletBloc>().add(
-                      RestoreWalletEvent(mnemonic: controller.text.trim()),
+                      RestoreWalletEvent(
+                        mnemonic: controller.text.trim(),
+                        notes: notesController.text.trim(),
+                      ),
                     );
                 Navigator.pop(context);
               }

@@ -1,39 +1,43 @@
-import 'package:equatable/equatable.dart';
+abstract class WalletEvent {}
 
-abstract class WalletEvent extends Equatable {
-  const WalletEvent();
+class CreateWalletEvent extends WalletEvent {
+  final String? notes;
 
-  @override
-  List<Object?> get props => [];
+  CreateWalletEvent({this.notes});
 }
-
-class CreateWalletEvent extends WalletEvent {}
 
 class RestoreWalletEvent extends WalletEvent {
   final String mnemonic;
+  final String? notes;
 
-  const RestoreWalletEvent({required this.mnemonic});
-
-  @override
-  List<Object?> get props => [mnemonic];
+  RestoreWalletEvent({
+    required this.mnemonic,
+    this.notes,
+  });
 }
+
+class LoadWalletEvent extends WalletEvent {}
 
 class GetBalanceEvent extends WalletEvent {
   final String address;
 
-  const GetBalanceEvent({required this.address});
-
-  @override
-  List<Object?> get props => [address];
+  GetBalanceEvent({required this.address});
 }
 
 class GetTransactionsEvent extends WalletEvent {
   final String address;
 
-  const GetTransactionsEvent({required this.address});
-
-  @override
-  List<Object?> get props => [address];
+  GetTransactionsEvent({required this.address});
 }
 
-class BackupWalletEvent extends WalletEvent {}
+class GenerateMnemonicEvent extends WalletEvent {}
+
+class VerifyMnemonicEvent extends WalletEvent {
+  final String mnemonic;
+  final String? notes;
+
+  VerifyMnemonicEvent({
+    required this.mnemonic,
+    this.notes,
+  });
+}

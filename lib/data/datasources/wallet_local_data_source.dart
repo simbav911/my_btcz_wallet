@@ -9,6 +9,7 @@ abstract class WalletLocalDataSource {
   Future<void> saveWallet(WalletModel wallet);
   Future<void> deleteWallet();
   Future<bool> hasWallet();
+  Future<void> resetWallet();
 }
 
 class WalletLocalDataSourceImpl implements WalletLocalDataSource {
@@ -134,6 +135,30 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
       throw CacheFailure(
         message: 'Failed to check wallet existence',
         code: 'SECURE_STORAGE_READ_ERROR',
+      );
+    }
+  }
+
+  @override
+  Future<void> resetWallet() async {
+    try {
+      WalletLogger.debug('Resetting wallet - clearing all secure storage');
+      await secureStorage.deleteAll(
+        iOptions: _storageConfig,
+        mOptions: const MacOsOptions(
+          accessibility: KeychainAccessibility.first_unlock,
+        ),
+      );
+      WalletLogger.info('Wallet reset successful - all data cleared');
+    } catch (e, stackTrace) {
+      WalletLogger.error(
+        'Failed to reset wallet',
+        e,
+        stackTrace,
+      );
+      throw CacheFailure(
+        message: 'Failed to reset wallet',
+        code: 'SECURE_STORAGE_RESET_ERROR',
       );
     }
   }

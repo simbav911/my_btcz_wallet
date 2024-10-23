@@ -3,6 +3,8 @@ import 'package:get_it/get_it.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:my_btcz_wallet/core/crypto/crypto_service.dart';
+import 'package:my_btcz_wallet/core/crypto/transaction_service.dart';
+import 'package:my_btcz_wallet/core/network/electrum_service.dart';
 import 'package:my_btcz_wallet/data/datasources/wallet_local_data_source.dart';
 import 'package:my_btcz_wallet/data/datasources/wallet_remote_data_source.dart';
 import 'package:my_btcz_wallet/data/repositories/wallet_repository_impl.dart';
@@ -24,6 +26,8 @@ Future<void> init() async {
       restoreWallet: sl(),
       getBalance: sl(),
       getTransactions: sl(),
+      cryptoService: sl(),
+      localDataSource: sl(),
     ),
   );
 
@@ -57,6 +61,13 @@ Future<void> init() async {
 
   //! Core
   sl.registerLazySingleton(() => CryptoService());
+  sl.registerLazySingleton(() => ElectrumService());
+  sl.registerLazySingleton(
+    () => TransactionService(
+      cryptoService: sl(),
+      electrumService: sl(),
+    ),
+  );
 
   final sharedPreferences = await SharedPreferences.getInstance();
   sl.registerLazySingleton(() => sharedPreferences);
