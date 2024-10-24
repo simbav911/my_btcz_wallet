@@ -4,28 +4,38 @@ import 'package:bip39/bip39.dart' as bip39;
 import 'package:bs58check/bs58check.dart' as bs58check;
 import 'package:crypto/crypto.dart';
 import 'package:hex/hex.dart';
-import 'package:my_btcz_wallet/core/error/failures.dart';
 import 'package:pointycastle/digests/ripemd160.dart';
 
 class CryptoService {
-  // BitcoinZ specific constants
-  static const int _btczPurpose = 44; // BIP44
-  static const int _btczCoinType = 177; // BitcoinZ
-  static const int _btczVersion = 0x1CB8; // BitcoinZ mainnet version
-  static const int _btczP2PKHVersion = 0x1CB8; // BitcoinZ P2PKH version
-  static const int _btczP2SHVersion = 0x1CBD; // BitcoinZ P2SH version
+  // BitcoinZ network constants
+  static const int _btczPurpose = 44;      // BIP44
+  static const int _btczCoinType = 177;    // BitcoinZ
+  static const int _btczVersion = 0x1CB8;  // Updated BitcoinZ mainnet version for t1 addresses
+  static const int _btczP2PKHVersion = 0x1CB8;  // Updated P2PKH version
+  static const int _btczP2SHVersion = 0x1CBD;   // P2SH version
 
-  // Generate a new mnemonic phrase (24 words)
+  // Generate new mnemonic (24 words for better security)
   String generateMnemonic() {
-    return bip39.generateMnemonic(strength: 256);
+    try {
+      return bip39.generateMnemonic(strength: 256);
+    } catch (e) {
+      throw CryptoFailure(
+        message: 'Failed to generate mnemonic: ${e.toString()}',
+        code: 'MNEMONIC_GENERATION_ERROR',
+      );
+    }
   }
 
   // Validate mnemonic phrase
   bool validateMnemonic(String mnemonic) {
-    return bip39.validateMnemonic(mnemonic);
+    try {
+      return bip39.validateMnemonic(mnemonic);
+    } catch (e) {
+      return false;
+    }
   }
 
-  // Generate master key from mnemonic
+  // Generate master key from mnemonic with additional validation
   Uint8List generateMasterKey(String mnemonic) {
     if (!validateMnemonic(mnemonic)) {
       throw const CryptoFailure(
@@ -34,22 +44,62 @@ class CryptoService {
       );
     }
 
-    final seed = bip39.mnemonicToSeed(mnemonic);
-    return seed;
+    try {
+      final seed = bip39.mnemonicToSeed(mnemonic);
+      if (seed.length != 64) {
+        throw const CryptoFailure(
+          message: 'Invalid seed length',
+          code: 'INVALID_SEED',
+        );
+      }
+      return seed;
+    } catch (e) {
+      throw CryptoFailure(
+        message: 'Failed to generate master key: ${e.toString()}',
+        code: 'MASTER_KEY_GENERATION_ERROR',
+      );
+    }
   }
 
-  // Derive private key using BIP44 path
+  // Derive private key using BIP44 path with additional validation
   // m/44'/177'/account'/change/index
   Uint8List derivePrivateKey(Uint8List masterKey, int account, int index) {
     try {
+      if (masterKey.length != 64) {
+        throw const CryptoFailure(
+          message: 'Invalid master key length',
+          code: 'INVALID_MASTER_KEY',
+        );
+      }
+
       final node = bip32.BIP32.fromSeed(masterKey);
       
-      // Derive the path according to BIP44
-      // m/44'/177'/account'/0/index
+      // Validate account and index ranges
+      if (account < 0 || account > 2147483647) { // 2^31-1
+        throw const CryptoFailure(
+          message: 'Invalid account number',
+          code: 'INVALID_ACCOUNT',
+        );
+      }
+      if (index < 0 || index > 2147483647) {
+        throw const CryptoFailure(
+          message: 'Invalid address index',
+          code: 'INVALID_INDEX',
+        );
+      }
+
       final derivedNode = node
           .derivePath("m/$_btczPurpose'/$_btczCoinType'/$account'/0/$index");
       
-      return derivedNode.privateKey!;
+      final privateKey = derivedNode.privateKey;
+      if (privateKey == null || privateKey.length != 32) {
+        throw const CryptoFailure(
+          message: 'Invalid derived private key',
+          code: 'INVALID_PRIVATE_KEY',
+        );
+      }
+      
+      return privateKey;
     } catch (e) {
       throw CryptoFailure(
         message: 'Failed to derive private key: ${e.toString()}',
@@ -58,14 +108,30 @@ class CryptoService {
     }
   }
 
-  // Generate public key from private key
+  // Generate public key from private key with validation
   Uint8List generatePublicKey(Uint8List privateKey) {
     try {
+      if (privateKey.length != 32) {
+        throw const CryptoFailure(
+          message: 'Invalid private key length',
+          code: 'INVALID_PRIVATE_KEY',
+        );
+      }
+
       final node = bip32.BIP32.fromPrivateKey(
         privateKey,
-        Uint8List(32), // chaincode (not needed for public key generation)
+        Uint8List(32), // chaincode
       );
-      return node.publicKey;
+      
+      final publicKey = node.publicKey;
+      if (publicKey.length != 33 && publicKey.length != 65) {
+        throw const CryptoFailure(
+          message: 'Invalid public key length',
+          code: 'INVALID_PUBLIC_KEY',
+        );
+      }
+      
+      return publicKey;
     } catch (e) {
       throw CryptoFailure(
         message: 'Failed to generate public key: ${e.toString()}',
@@ -74,40 +140,43 @@ class CryptoService {
     }
   }
 
-  // Generate BitcoinZ address from public key
+  // Generate BitcoinZ address from public key with proper versioning
   String generateAddress(Uint8List publicKey) {
     try {
-      // 1. Perform SHA-256 hashing on the public key
-      final sha256Hash = Uint8List.fromList(sha256.convert(publicKey).bytes);
+      if (publicKey.isEmpty) {
+        throw const CryptoFailure(
+          message: 'Empty public key',
+          code: 'EMPTY_PUBLIC_KEY',
+        );
+      }
 
-      // 2. Perform RIPEMD-160 hashing on the result
+      // 1. SHA-256 hash
+      final sha256Hash = sha256.convert(publicKey).bytes;
+
+      // 2. RIPEMD-160 hash
       final ripemd160 = RIPEMD160Digest();
       final ripemd160Hash = Uint8List(20);
-      ripemd160.update(sha256Hash, 0, sha256Hash.length);
+      ripemd160.update(Uint8List.fromList(sha256Hash), 0, sha256Hash.length);
       ripemd160.doFinal(ripemd160Hash, 0);
 
-      // 3. Add version bytes (0x1CB8 = [0x1C, 0xB8])
-      final versionedHash = Uint8List(22);
-      versionedHash[0] = 0x1C;
-      versionedHash[1] = 0xB8;
-      versionedHash.setRange(2, 22, ripemd160Hash);
+      // 3. Add version bytes for t1 address format
+      final payload = Uint8List(22);
+      payload[0] = (_btczP2PKHVersion >> 8) & 0xFF;
+      payload[1] = _btczP2PKHVersion & 0xFF;
+      payload.setRange(2, 22, ripemd160Hash);
 
-      // 4. Create checksum (first 4 bytes of double SHA-256)
-      final checksum = sha256
-          .convert(sha256.convert(versionedHash).bytes)
-          .bytes
-          .sublist(0, 4);
+      // 4. Base58Check encoding
+      final address = bs58check.encode(payload);
 
-      // 5. Create final binary address
-      final binaryAddress = Uint8List(26);
-      binaryAddress.setRange(0, 22, versionedHash);
-      binaryAddress.setRange(22, 26, checksum);
+      // 5. Validate the generated address
+      if (!validateAddress(address)) {
+        throw const CryptoFailure(
+          message: 'Generated invalid address',
+          code: 'INVALID_ADDRESS_GENERATED',
+        );
+      }
 
-      // 6. Convert to base58
-      final address = bs58check.encode(binaryAddress);
-      
-      // 7. Add 't' prefix for BitcoinZ
-      return 't$address';
+      return address;
     } catch (e) {
       throw CryptoFailure(
         message: 'Failed to generate address: ${e.toString()}',
@@ -116,15 +185,64 @@ class CryptoService {
     }
   }
 
-  // Sign a transaction
+  // Validate BitcoinZ address format
+  bool validateAddress(String address) {
+    try {
+      // Check basic format
+      if (!address.startsWith('t1')) {
+        return false;
+      }
+
+      // Check length
+      if (address.length < 34 || address.length > 36) {
+        return false;
+      }
+
+      // Decode and verify version
+      final decoded = bs58check.decode(address);
+      if (decoded.length != 22) {
+        return false;
+      }
+
+      // Check version bytes
+      final version = (decoded[0] << 8) | decoded[1];
+      return version == _btczP2PKHVersion;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Sign transaction with additional validation
   Uint8List signTransaction(Uint8List privateKey, Uint8List transactionHash) {
     try {
+      if (privateKey.length != 32) {
+        throw const CryptoFailure(
+          message: 'Invalid private key length',
+          code: 'INVALID_PRIVATE_KEY',
+        );
+      }
+
+      if (transactionHash.length != 32) {
+        throw const CryptoFailure(
+          message: 'Invalid transaction hash length',
+          code: 'INVALID_TRANSACTION_HASH',
+        );
+      }
+
       final node = bip32.BIP32.fromPrivateKey(
         privateKey,
-        Uint8List(32), // chaincode (not needed for signing)
+        Uint8List(32), // chaincode
       );
-      // TODO: Implement proper transaction signing
-      return node.sign(transactionHash);
+      
+      final signature = node.sign(transactionHash);
+      if (signature.length != 64 && signature.length != 65) {
+        throw const CryptoFailure(
+          message: 'Invalid signature length',
+          code: 'INVALID_SIGNATURE',
+        );
+      }
+      
+      return signature;
     } catch (e) {
       throw CryptoFailure(
         message: 'Failed to sign transaction: ${e.toString()}',
@@ -133,23 +251,38 @@ class CryptoService {
     }
   }
 
-  // Verify a signature
+  // Verify signature with additional validation
   bool verifySignature(
     Uint8List publicKey,
     Uint8List signature,
     Uint8List transactionHash,
   ) {
     try {
+      if (publicKey.isEmpty || signature.isEmpty || transactionHash.isEmpty) {
+        return false;
+      }
+
       final node = bip32.BIP32.fromPublicKey(
         publicKey,
-        Uint8List(32), // chaincode (not needed for verification)
+        Uint8List(32), // chaincode
       );
       return node.verify(transactionHash, signature);
     } catch (e) {
-      throw CryptoFailure(
-        message: 'Failed to verify signature: ${e.toString()}',
-        code: 'SIGNATURE_VERIFICATION_ERROR',
-      );
+      return false;
     }
   }
+}
+
+// Failure class definition
+class CryptoFailure implements Exception {
+  final String message;
+  final String code;
+
+  const CryptoFailure({
+    required this.message,
+    required this.code,
+  });
+
+  @override
+  String toString() => 'CryptoFailure: $message (Code: $code)';
 }
