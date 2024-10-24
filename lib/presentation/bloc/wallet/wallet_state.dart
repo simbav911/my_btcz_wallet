@@ -37,42 +37,60 @@ class WalletRestored extends WalletState {
 
 class WalletLoaded extends WalletState {
   final WalletModel wallet;
+  final double? unconfirmedBalance;
+  final List<Map<String, dynamic>>? pendingTransactions;
 
   const WalletLoaded(
     this.wallet, {
+    this.unconfirmedBalance,
+    this.pendingTransactions,
     ConnectionStatus connectionStatus = ConnectionStatus.disconnected,
   }) : super(connectionStatus: connectionStatus);
 
   WalletLoaded copyWith({
     WalletModel? wallet,
+    double? unconfirmedBalance,
+    List<Map<String, dynamic>>? pendingTransactions,
     ConnectionStatus? connectionStatus,
   }) {
     return WalletLoaded(
       wallet ?? this.wallet,
+      unconfirmedBalance: unconfirmedBalance ?? this.unconfirmedBalance,
+      pendingTransactions: pendingTransactions ?? this.pendingTransactions,
       connectionStatus: connectionStatus ?? this.connectionStatus,
     );
   }
 
   @override
-  List<Object?> get props => [wallet, connectionStatus];
+  List<Object?> get props => [wallet, unconfirmedBalance, pendingTransactions, connectionStatus];
 }
 
 class BalanceLoaded extends WalletState {
-  final double balance;
+  final double confirmedBalance;
+  final double unconfirmedBalance;
 
-  const BalanceLoaded(this.balance);
+  const BalanceLoaded({
+    required this.confirmedBalance,
+    required this.unconfirmedBalance,
+  });
+
+  double get totalBalance => confirmedBalance + unconfirmedBalance;
 
   @override
-  List<Object?> get props => [balance, connectionStatus];
+  List<Object?> get props => [confirmedBalance, unconfirmedBalance, connectionStatus];
 }
 
 class TransactionsLoaded extends WalletState {
-  final List<String> transactions;
+  final List<Map<String, dynamic>> transactions;
+  final List<Map<String, dynamic>> pendingTransactions;
 
-  const TransactionsLoaded(this.transactions);
+  const TransactionsLoaded({
+    required this.transactions,
+    required this.pendingTransactions,
+  });
 
   @override
-  List<Object?> get props => [transactions, connectionStatus];
+  List<Object?> get props => [transactions, pendingTransactions, connectionStatus];
 }
 
 class MnemonicGenerated extends WalletState {

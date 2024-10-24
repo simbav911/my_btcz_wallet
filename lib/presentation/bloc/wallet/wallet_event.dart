@@ -50,6 +50,43 @@ class GetTransactionsEvent extends WalletEvent {
   List<Object> get props => [address];
 }
 
+class StartAutoUpdateEvent extends WalletEvent {
+  final String address;
+  final Duration interval;
+
+  const StartAutoUpdateEvent({
+    required this.address,
+    this.interval = const Duration(seconds: 15), // Updated to 15 seconds
+  });
+
+  @override
+  List<Object> get props => [address, interval];
+}
+
+class StopAutoUpdateEvent extends WalletEvent {}
+
+class RefreshWalletEvent extends WalletEvent {
+  final String address;
+
+  const RefreshWalletEvent({required this.address});
+
+  @override
+  List<Object> get props => [address];
+}
+
+class UpdatePendingTransactionEvent extends WalletEvent {
+  final String txId;
+  final Map<String, dynamic> transaction;
+
+  const UpdatePendingTransactionEvent({
+    required this.txId,
+    required this.transaction,
+  });
+
+  @override
+  List<Object> get props => [txId, transaction];
+}
+
 class GenerateMnemonicEvent extends WalletEvent {}
 
 class VerifyMnemonicEvent extends WalletEvent {
@@ -65,7 +102,6 @@ class VerifyMnemonicEvent extends WalletEvent {
   List<Object> get props => [mnemonic, notes];
 }
 
-// New connection-related events
 class UpdateConnectionStatus extends WalletEvent {
   final ConnectionStatus status;
 
