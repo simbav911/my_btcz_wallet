@@ -5,6 +5,7 @@ import 'package:bs58check/bs58check.dart' as bs58check;
 import 'package:crypto/crypto.dart';
 import 'package:hex/hex.dart';
 import 'package:pointycastle/digests/ripemd160.dart';
+import 'package:my_btcz_wallet/core/error/failures.dart';
 
 class CryptoService {
   // BitcoinZ network constants
@@ -13,15 +14,56 @@ class CryptoService {
   static const int _btczVersion = 0x1CB8;  // Updated BitcoinZ mainnet version for t1 addresses
   static const int _btczP2PKHVersion = 0x1CB8;  // Updated P2PKH version
   static const int _btczP2SHVersion = 0x1CBD;   // P2SH version
+  static const int _btczWIFVersion = 0x80;      // WIF version
 
-  // Generate new mnemonic (24 words for better security)
+  // Generate new mnemonic (12 words for BitcoinZ compatibility)
   String generateMnemonic() {
     try {
-      return bip39.generateMnemonic(strength: 256);
+      return bip39.generateMnemonic(strength: 128); // Changed from 256 to 128 for 12 words
     } catch (e) {
       throw CryptoFailure(
         message: 'Failed to generate mnemonic: ${e.toString()}',
         code: 'MNEMONIC_GENERATION_ERROR',
+      );
+    }
+  }
+
+  // Convert private key to WIF format
+  String privateKeyToWIF(String privateKeyHex) {
+    try {
+      // Decode hex private key
+      final privateKeyBytes = HEX.decode(privateKeyHex);
+      return _privateKeyBytesToWIF(privateKeyBytes);
+    } catch (e) {
+      throw CryptoFailure(
+        message: 'Failed to convert private key to WIF: ${e.toString()}',
+        code: 'WIF_CONVERSION_ERROR',
+      );
+    }
+  }
+
+  // Convert private key bytes to WIF format
+  String _privateKeyBytesToWIF(List<int> privateKeyBytes) {
+    try {
+      if (privateKeyBytes.length != 32) {
+        throw const CryptoFailure(
+          message: 'Invalid private key length',
+          code: 'INVALID_PRIVATE_KEY',
+        );
+      }
+
+      // Create payload with version byte and compression byte
+      final payload = Uint8List(34);
+      payload[0] = _btczWIFVersion;
+      payload.setRange(1, 33, privateKeyBytes);
+      payload[33] = 0x01; // Compression flag
+
+      // Encode to WIF format
+      return bs58check.encode(payload);
+    } catch (e) {
+      throw CryptoFailure(
+        message: 'Failed to convert private key bytes to WIF: ${e.toString()}',
+        code: 'WIF_CONVERSION_ERROR',
       );
     }
   }
@@ -271,18 +313,4 @@ class CryptoService {
       return false;
     }
   }
-}
-
-// Failure class definition
-class CryptoFailure implements Exception {
-  final String message;
-  final String code;
-
-  const CryptoFailure({
-    required this.message,
-    required this.code,
-  });
-
-  @override
-  String toString() => 'CryptoFailure: $message (Code: $code)';
 }

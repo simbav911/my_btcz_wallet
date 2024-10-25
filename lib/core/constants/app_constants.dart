@@ -1,28 +1,26 @@
 class AppConstants {
   // App
   static const String appName = 'BitcoinZ Wallet';
-  static const String appVersion = '1.0.0';
-
+  
   // Network
+  static const String defaultElectrumServer = 'electrum.btcz.rocks';
+  static const int defaultElectrumPort = 1001;
+  static const bool defaultElectrumSSL = true;
   static const List<String> electrumServers = [
-    'electrum1.btcz.rocks:50002',
-    'electrum2.btcz.rocks:50002',
-    'electrum3.btcz.rocks:50002',
-    'electrum4.btcz.rocks:50002',
-    'electrum5.btcz.rocks:50002',
+    'electrum.btcz.rocks',
+    'electrum2.btcz.rocks'
   ];
 
-  // Storage Keys
-  static const String walletKey = 'wallet_data';
-  static const String settingsKey = 'app_settings';
-  static const String networkKey = 'network_preferences';
-
-  // Timeouts
-  static const int connectionTimeout = 30000; // 30 seconds
-  static const int receiveTimeout = 30000; // 30 seconds
-
   // Wallet
-  static const int mnemonicStrength = 256; // 24 words
+  static const int mnemonicStrength = 128; // 12 words
   static const String coinType = 'BTCZ';
-  static const int defaultConfirmations = 6;
+  static const String coinName = 'BitcoinZ';
+  static const String coinSymbol = 'BTCZ';
+  static const int decimals = 8;
+  static const double defaultFee = 0.0001;
+
+  // UI
+  static const int qrSize = 300;
+  static const double minSendAmount = 0.00000001;
+  static const double maxSendAmount = 21000000;
 }

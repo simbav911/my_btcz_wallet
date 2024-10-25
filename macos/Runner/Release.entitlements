@@ -12,5 +12,7 @@
 	<array>
 		<string>$(AppIdentifierPrefix)com.example.my_btcz_wallet</string>
 	</array>
+	<key>com.apple.security.keychain</key>
+	<true/>
 </dict>
 </plist>

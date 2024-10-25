@@ -1,19 +1,30 @@
-import 'dart:typed_data';
-import 'package:my_btcz_wallet/core/crypto/crypto_service.dart';
 import 'package:my_btcz_wallet/core/error/failures.dart';
 import 'package:my_btcz_wallet/core/network/electrum_service.dart';
 import 'package:my_btcz_wallet/core/utils/logger.dart';
+import 'package:my_btcz_wallet/core/crypto/qr_code_service.dart';
+import 'package:my_btcz_wallet/core/crypto/crypto_service.dart';
+import 'package:my_btcz_wallet/core/crypto/transaction_builder.dart';
+import 'package:my_btcz_wallet/core/crypto/transaction_serializer.dart';
 
 class TransactionService {
-  final CryptoService cryptoService;
   final ElectrumService electrumService;
+  final QRCodeService qrCodeService;
+  final CryptoService cryptoService;
 
   TransactionService({
-    required this.cryptoService,
     required this.electrumService,
-  });
+    required this.cryptoService,
+  }) : qrCodeService = QRCodeService();
 
-  Future<String> createTransaction({
+  Future<String> generateReceiveQRCode(String address, {double? amount}) async {
+    return qrCodeService.generateReceiveQRCode(address, amount: amount);
+  }
+
+  Future<Map<String, String>> decodeQRCode(String data) async {
+    return qrCodeService.decodeQRCode(data);
+  }
+
+  Future<Map<String, dynamic>> createTransaction({
     required String fromAddress,
     required String toAddress,
     required double amount,
@@ -21,117 +32,86 @@ class TransactionService {
     double? fee,
   }) async {
     try {
-      // 1. Get unspent transaction outputs (UTXOs)
-      final utxos = await _getUnspentOutputs(fromAddress);
+      WalletLogger.debug('Creating transaction preview');
       
-      // 2. Calculate total amount needed (amount + fee)
-      final totalNeeded = amount + (fee ?? 0.0001); // Default fee 0.0001 BTCZ
-      
-      // 3. Select UTXOs to use
-      final selectedUtxos = _selectUtxos(utxos, totalNeeded);
-      
-      // 4. Create raw transaction
-      final rawTx = await _createRawTransaction(
-        selectedUtxos,
+      // Convert hex private key to WIF format
+      WalletLogger.debug('Converting private key to WIF format');
+      final privateKeyWIF = cryptoService.privateKeyToWIF(privateKey);
+      WalletLogger.debug('Private key converted to WIF format');
+
+      // Get unspent outputs
+      WalletLogger.debug('Getting unspent outputs for address: $fromAddress');
+      final unspentOutputs = await electrumService.getUnspentOutputs(fromAddress);
+      WalletLogger.debug('Unspent outputs response: $unspentOutputs');
+
+      // Create transaction data
+      final txData = await TransactionBuilder.createAndSignTransaction(
+        unspentOutputs,
         toAddress,
         amount,
         fromAddress,
+        privateKeyWIF,
         fee ?? 0.0001,
       );
-      
-      // 5. Sign transaction
-      final signedTx = _signTransaction(rawTx, privateKey);
-      
-      // 6. Broadcast transaction
-      final txId = await _broadcastTransaction(signedTx);
-      
-      return txId;
-    } catch (e) {
-      WalletLogger.error('Failed to create transaction', e);
-      throw TransactionFailure(
+
+      // Serialize for preview
+      final rawTx = TransactionSerializer.serializeToHex(txData);
+      WalletLogger.debug('Created transaction hex: $rawTx');
+
+      // Log transaction details
+      WalletLogger.debug('Transaction details:');
+      WalletLogger.debug('- Version: ${txData['version']}');
+      WalletLogger.debug('- Version Group ID: 0x${txData['versionGroupId'].toRadixString(16)}');
+      WalletLogger.debug('- Inputs count: ${txData['inputs'].length}');
+      WalletLogger.debug('- Outputs count: ${txData['outputs'].length}');
+      WalletLogger.debug('- Lock time: ${txData['locktime']}');
+      WalletLogger.debug('- Expiry height: ${txData['expiryHeight']}');
+
+      return {
+        'rawTransaction': rawTx,
+        'fee': (fee ?? 0.0001).toString(),
+        'amount': amount.toString(),
+        'fromAddress': fromAddress,
+        'toAddress': toAddress,
+        'transactionData': txData,
+      };
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to create transaction', e, stackTrace);
+      throw CryptoFailure(
         message: 'Failed to create transaction: ${e.toString()}',
         code: 'TRANSACTION_CREATE_ERROR',
       );
     }
   }
 
-  Future<List<Map<String, dynamic>>> _getUnspentOutputs(String address) async {
-    // TODO: Implement UTXO fetching from Electrum server
-    throw UnimplementedError();
-  }
-
-  List<Map<String, dynamic>> _selectUtxos(
-    List<Map<String, dynamic>> utxos,
-    double totalNeeded,
-  ) {
-    // TODO: Implement UTXO selection algorithm
-    throw UnimplementedError();
-  }
-
-  Future<Map<String, dynamic>> _createRawTransaction(
-    List<Map<String, dynamic>> inputs,
-    String toAddress,
-    double amount,
-    String changeAddress,
-    double fee,
-  ) async {
-    // TODO: Implement raw transaction creation
-    throw UnimplementedError();
-  }
-
-  Uint8List _signTransaction(
-    Map<String, dynamic> rawTx,
-    String privateKey,
-  ) {
-    // TODO: Implement transaction signing
-    throw UnimplementedError();
-  }
-
-  Future<String> _broadcastTransaction(Uint8List signedTx) async {
-    // TODO: Implement transaction broadcasting
-    throw UnimplementedError();
-  }
-
-  Future<String> generateReceiveQRCode(String address, {double? amount}) async {
-    final uriData = StringBuffer('bitcoinz:$address');
-    
-    if (amount != null) {
-      uriData.write('?amount=$amount');
-    }
-    
-    return uriData.toString();
-  }
-
-  Future<Map<String, dynamic>> decodeQRCode(String qrData) async {
+  Future<String> broadcastTransaction(Map<String, dynamic> transactionDetails) async {
     try {
-      final uri = Uri.parse(qrData);
+      WalletLogger.debug('Broadcasting confirmed transaction');
       
-      if (uri.scheme != 'bitcoinz') {
-        throw const TransactionFailure(
-          message: 'Invalid QR code: not a BitcoinZ address',
-          code: 'INVALID_QR_CODE',
-        );
-      }
+      final rawTx = transactionDetails['rawTransaction'] as String;
+      WalletLogger.debug('Broadcasting transaction hex: $rawTx');
       
-      return {
-        'address': uri.path,
-        'amount': uri.queryParameters['amount'] != null
-            ? double.parse(uri.queryParameters['amount']!)
-            : null,
-      };
-    } catch (e) {
-      WalletLogger.error('Failed to decode QR code', e);
-      throw TransactionFailure(
-        message: 'Failed to decode QR code: ${e.toString()}',
-        code: 'QR_DECODE_ERROR',
+      // Use ElectrumService's implementation to broadcast
+      final txId = await electrumService.broadcastTransaction(rawTx);
+      WalletLogger.info('Transaction broadcasted successfully: $txId');
+
+      return txId;
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to broadcast transaction', e, stackTrace);
+      throw CryptoFailure(
+        message: 'Failed to broadcast transaction: ${e.toString()}',
+        code: 'TRANSACTION_BROADCAST_ERROR',
       );
     }
   }
-}
 
-class TransactionFailure extends Failure {
-  const TransactionFailure({
-    required String message,
-    required String code,
-  }) : super(message: message, code: code);
+  Future<double> estimateFee(int targetBlocks) async {
+    try {
+      final estimate = await electrumService.getFeeEstimate(targetBlocks);
+      return (estimate['feeRate'] as num).toDouble();
+    } catch (e) {
+      // Default to 0.0001 BTCZ if estimation fails
+      return 0.0001;
+    }
+  }
 }

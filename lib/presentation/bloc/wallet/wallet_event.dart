@@ -1,114 +1,102 @@
-import 'package:equatable/equatable.dart';
-import 'package:my_btcz_wallet/core/network/electrum_service.dart';
+import 'package:my_btcz_wallet/core/network/connection_status.dart';
 
-abstract class WalletEvent extends Equatable {
+abstract class WalletEvent {
   const WalletEvent();
-
-  @override
-  List<Object?> get props => [];
 }
 
 class CreateWalletEvent extends WalletEvent {
-  final String notes;
-
-  const CreateWalletEvent({required this.notes});
-
-  @override
-  List<Object> get props => [notes];
+  final String? notes;
+  const CreateWalletEvent({this.notes});
 }
 
 class RestoreWalletEvent extends WalletEvent {
   final String mnemonic;
-  final String notes;
-
-  const RestoreWalletEvent({
-    required this.mnemonic,
-    required this.notes,
-  });
-
-  @override
-  List<Object> get props => [mnemonic, notes];
+  final String? notes;
+  const RestoreWalletEvent({required this.mnemonic, this.notes});
 }
 
-class LoadWalletEvent extends WalletEvent {}
+class LoadWalletEvent extends WalletEvent {
+  const LoadWalletEvent();
+}
 
 class GetBalanceEvent extends WalletEvent {
   final String address;
-
   const GetBalanceEvent({required this.address});
-
-  @override
-  List<Object> get props => [address];
 }
 
 class GetTransactionsEvent extends WalletEvent {
   final String address;
-
   const GetTransactionsEvent({required this.address});
+}
 
-  @override
-  List<Object> get props => [address];
+class GenerateMnemonicEvent extends WalletEvent {
+  const GenerateMnemonicEvent();
+}
+
+class VerifyMnemonicEvent extends WalletEvent {
+  final String mnemonic;
+  final String? notes;
+  const VerifyMnemonicEvent({required this.mnemonic, this.notes});
+}
+
+class UpdateConnectionStatus extends WalletEvent {
+  final ConnectionStatus status;
+  const UpdateConnectionStatus(this.status);
+}
+
+class ConnectToServer extends WalletEvent {
+  const ConnectToServer();
 }
 
 class StartAutoUpdateEvent extends WalletEvent {
   final String address;
   final Duration interval;
-
   const StartAutoUpdateEvent({
     required this.address,
-    this.interval = const Duration(seconds: 15), // Updated to 15 seconds
+    this.interval = const Duration(minutes: 2),
   });
-
-  @override
-  List<Object> get props => [address, interval];
 }
 
-class StopAutoUpdateEvent extends WalletEvent {}
+class StopAutoUpdateEvent extends WalletEvent {
+  const StopAutoUpdateEvent();
+}
 
 class RefreshWalletEvent extends WalletEvent {
   final String address;
-
   const RefreshWalletEvent({required this.address});
-
-  @override
-  List<Object> get props => [address];
 }
 
 class UpdatePendingTransactionEvent extends WalletEvent {
   final String txId;
   final Map<String, dynamic> transaction;
-
   const UpdatePendingTransactionEvent({
     required this.txId,
     required this.transaction,
   });
-
-  @override
-  List<Object> get props => [txId, transaction];
 }
 
-class GenerateMnemonicEvent extends WalletEvent {}
+// New events for transaction confirmation flow
+class PrepareTransactionEvent extends WalletEvent {
+  final String fromAddress;
+  final String toAddress;
+  final double amount;
+  final String privateKey;
+  final double? fee;
 
-class VerifyMnemonicEvent extends WalletEvent {
-  final String mnemonic;
-  final String notes;
-
-  const VerifyMnemonicEvent({
-    required this.mnemonic,
-    required this.notes,
+  const PrepareTransactionEvent({
+    required this.fromAddress,
+    required this.toAddress,
+    required this.amount,
+    required this.privateKey,
+    this.fee,
   });
-
-  @override
-  List<Object> get props => [mnemonic, notes];
 }
 
-class UpdateConnectionStatus extends WalletEvent {
-  final ConnectionStatus status;
-
-  const UpdateConnectionStatus(this.status);
-
-  @override
-  List<Object> get props => [status];
+class ConfirmTransactionEvent extends WalletEvent {
+  final Map<String, dynamic> transactionDetails;
+  const ConfirmTransactionEvent(this.transactionDetails);
 }
 
-class ConnectToServer extends WalletEvent {}
+class CancelTransactionEvent extends WalletEvent {
+  const CancelTransactionEvent();
+}

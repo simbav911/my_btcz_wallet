@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:my_btcz_wallet/core/error/failures.dart';
 import 'package:my_btcz_wallet/core/utils/logger.dart';
@@ -19,10 +20,25 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
 
   static const String _walletKey = 'wallet_data';
 
-  // Configure storage for each platform
-  static const _storageConfig = IOSOptions(
-    accessibility: KeychainAccessibility.first_unlock,
+  // Platform-specific storage options
+  static const _androidOptions = AndroidOptions(
+    encryptedSharedPreferences: true,
+    resetOnError: true,
   );
+
+  static const _iosOptions = IOSOptions(
+    accessibility: KeychainAccessibility.first_unlock,
+    synchronizable: true,
+  );
+
+  static const _macOptions = MacOsOptions(
+    accessibility: KeychainAccessibility.first_unlock,
+    synchronizable: true,
+  );
+
+  static const _linuxOptions = LinuxOptions();
+
+  static const _windowsOptions = WindowsOptions();
 
   @override
   Future<WalletModel?> getWallet() async {
@@ -30,10 +46,11 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
       WalletLogger.debug('Retrieving wallet from secure storage');
       final walletString = await secureStorage.read(
         key: _walletKey,
-        iOptions: _storageConfig,
-        mOptions: const MacOsOptions(
-          accessibility: KeychainAccessibility.first_unlock,
-        ),
+        aOptions: _androidOptions,
+        iOptions: _iosOptions,
+        mOptions: _macOptions,
+        lOptions: _linuxOptions,
+        wOptions: _windowsOptions,
       );
 
       if (walletString == null) {
@@ -51,7 +68,7 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
         stackTrace,
       );
       throw CacheFailure(
-        message: 'Failed to get wallet from secure storage',
+        message: 'Failed to get wallet from secure storage: ${e.toString()}',
         code: 'SECURE_STORAGE_READ_ERROR',
       );
     }
@@ -67,10 +84,11 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
       await secureStorage.write(
         key: _walletKey,
         value: walletString,
-        iOptions: _storageConfig,
-        mOptions: const MacOsOptions(
-          accessibility: KeychainAccessibility.first_unlock,
-        ),
+        aOptions: _androidOptions,
+        iOptions: _iosOptions,
+        mOptions: _macOptions,
+        lOptions: _linuxOptions,
+        wOptions: _windowsOptions,
       );
       
       WalletLogger.info('Wallet saved successfully to secure storage');
@@ -81,7 +99,7 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
         stackTrace,
       );
       throw CacheFailure(
-        message: 'Failed to save wallet to secure storage',
+        message: 'Failed to save wallet to secure storage: ${e.toString()}',
         code: 'SECURE_STORAGE_WRITE_ERROR',
       );
     }
@@ -93,10 +111,11 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
       WalletLogger.debug('Deleting wallet from secure storage');
       await secureStorage.delete(
         key: _walletKey,
-        iOptions: _storageConfig,
-        mOptions: const MacOsOptions(
-          accessibility: KeychainAccessibility.first_unlock,
-        ),
+        aOptions: _androidOptions,
+        iOptions: _iosOptions,
+        mOptions: _macOptions,
+        lOptions: _linuxOptions,
+        wOptions: _windowsOptions,
       );
       WalletLogger.info('Wallet deleted successfully from secure storage');
     } catch (e, stackTrace) {
@@ -106,7 +125,7 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
         stackTrace,
       );
       throw CacheFailure(
-        message: 'Failed to delete wallet from secure storage',
+        message: 'Failed to delete wallet from secure storage: ${e.toString()}',
         code: 'SECURE_STORAGE_DELETE_ERROR',
       );
     }
@@ -118,10 +137,11 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
       WalletLogger.debug('Checking wallet existence in secure storage');
       final walletString = await secureStorage.read(
         key: _walletKey,
-        iOptions: _storageConfig,
-        mOptions: const MacOsOptions(
-          accessibility: KeychainAccessibility.first_unlock,
-        ),
+        aOptions: _androidOptions,
+        iOptions: _iosOptions,
+        mOptions: _macOptions,
+        lOptions: _linuxOptions,
+        wOptions: _windowsOptions,
       );
       final exists = walletString != null;
       WalletLogger.debug('Wallet exists: $exists');
@@ -133,7 +153,7 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
         stackTrace,
       );
       throw CacheFailure(
-        message: 'Failed to check wallet existence',
+        message: 'Failed to check wallet existence: ${e.toString()}',
         code: 'SECURE_STORAGE_READ_ERROR',
       );
     }
@@ -144,10 +164,11 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
     try {
       WalletLogger.debug('Resetting wallet - clearing all secure storage');
       await secureStorage.deleteAll(
-        iOptions: _storageConfig,
-        mOptions: const MacOsOptions(
-          accessibility: KeychainAccessibility.first_unlock,
-        ),
+        aOptions: _androidOptions,
+        iOptions: _iosOptions,
+        mOptions: _macOptions,
+        lOptions: _linuxOptions,
+        wOptions: _windowsOptions,
       );
       WalletLogger.info('Wallet reset successful - all data cleared');
     } catch (e, stackTrace) {
@@ -157,7 +178,7 @@ class WalletLocalDataSourceImpl implements WalletLocalDataSource {
         stackTrace,
       );
       throw CacheFailure(
-        message: 'Failed to reset wallet',
+        message: 'Failed to reset wallet: ${e.toString()}',
         code: 'SECURE_STORAGE_RESET_ERROR',
       );
     }

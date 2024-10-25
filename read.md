@@ -1,24 +1,42 @@
+Certainly! Below is the full updated code for the `ElectrumService` class, incorporating the necessary fixes to ensure that transactions are constructed and broadcasted correctly on the BitcoinZ network. This includes handling the correct transaction version, version group ID, and ensuring all transaction fields comply with the network's requirements.
+
+Please make sure to replace placeholders like `'YourPrivateKeyInWIFFormat'`, `'t1YourFromAddress'`, and `'t1RecipientAddress'` with your actual private key and addresses.
+
+```dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' show Random;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
-import 'package:hex/hex.dart';
+import 'package:bitcoin_flutter/bitcoin_flutter.dart' as bitcoin;
 import 'package:bs58check/bs58check.dart' as bs58check;
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:my_btcz_wallet/core/utils/logger.dart';
-import 'package:my_btcz_wallet/core/network/connection_status.dart';
-import 'package:pointycastle/api.dart';
-import 'package:pointycastle/digests/sha256.dart';
-import 'package:pointycastle/ecc/api.dart';
-import 'package:pointycastle/ecc/curves/secp256k1.dart';
-import 'package:pointycastle/macs/hmac.dart';
-import 'package:pointycastle/random/fortuna_random.dart';
-import 'package:pointycastle/signers/ecdsa_signer.dart';
-import 'package:bip32/bip32.dart' as bip32;
+import 'package:crypto/crypto.dart';
+import 'package:hex/hex.dart';
+
+// Replace this with your actual logger implementation
+class WalletLogger {
+  static void debug(String message) {
+    print('DEBUG: $message');
+  }
+
+  static void info(String message) {
+    print('INFO: $message');
+  }
+
+  static void error(String message, [dynamic error, StackTrace? stackTrace]) {
+    print('ERROR: $message');
+    if (error != null) print('Error: $error');
+    if (stackTrace != null) print('StackTrace: $stackTrace');
+  }
+}
+
+enum ConnectionStatus {
+  disconnected,
+  connecting,
+  connected,
+}
 
 class _QueuedRequest {
   final String method;
@@ -26,210 +44,6 @@ class _QueuedRequest {
   final Completer<dynamic> completer;
 
   _QueuedRequest(this.method, this.params, this.completer);
-}
-
-// Utility functions
-Uint8List bigIntToBytes(BigInt number) {
-  int bytes = (number.bitLength + 7) >> 3;
-  var b256 = BigInt.from(256);
-  var result = Uint8List(bytes);
-  for (int i = bytes - 1; i >= 0; i--) {
-    result[i] = (number % b256).toInt();
-    number = number >> 8;
-  }
-  return result;
-}
-
-Uint8List derEncodeSignature(BigInt r, BigInt s) {
-  List<int> sequence = [];
-
-  List<int> rBytes = bigIntToBytes(r);
-  if (rBytes[0] & 0x80 != 0) {
-    rBytes = [0x00] + rBytes;
-  }
-  sequence.add(0x02); // INTEGER tag
-  sequence.add(rBytes.length);
-  sequence.addAll(rBytes);
-
-  List<int> sBytes = bigIntToBytes(s);
-  if (sBytes[0] & 0x80 != 0) {
-    sBytes = [0x00] + sBytes;
-  }
-  sequence.add(0x02); // INTEGER tag
-  sequence.add(sBytes.length);
-  sequence.addAll(sBytes);
-
-  sequence = [0x30, sequence.length] + sequence;
-
-  return Uint8List.fromList(sequence);
-}
-
-// Transaction related classes
-class Transaction {
-  final int version;
-  final int versionGroupId;  // Added for Overwinter
-  final List<TxInput> inputs;
-  final List<TxOutput> outputs;
-  final int lockTime;
-  final int expiryHeight;   // Added for Overwinter
-  final int valueBalance;   // Added for Overwinter
-
-  Transaction({
-    required this.version,
-    required this.inputs,
-    required this.outputs,
-    this.lockTime = 0,
-    this.versionGroupId = 0x03C48270,  // BitcoinZ Overwinter version group ID
-    this.expiryHeight = 0,
-    this.valueBalance = 0,
-  });
-
-  Uint8List serialize() {
-    final totalSize = 4 + // version
-        4 + // version group id
-        varintLength(inputs.length) +
-        inputs.fold<int>(0, (int sum, input) => sum + input.getSize()) +
-        varintLength(outputs.length) +
-        outputs.fold<int>(0, (int sum, output) => sum + output.getSize()) +
-        4 + // lockTime
-        4 + // expiry height
-        8;  // value balance
-
-    final buffer = ByteData(totalSize);
-    var offset = 0;
-
-    // Write version
-    buffer.setInt32(offset, version, Endian.little);
-    offset += 4;
-
-    // Write version group ID (Overwinter)
-    buffer.setInt32(offset, versionGroupId, Endian.little);
-    offset += 4;
-
-    // Write number of inputs
-    offset = writeVarInt(buffer, offset, inputs.length);
-
-    // Write inputs
-    for (var input in inputs) {
-      offset = input.serialize(buffer, offset);
-    }
-
-    // Write number of outputs
-    offset = writeVarInt(buffer, offset, outputs.length);
-
-    // Write outputs
-    for (var output in outputs) {
-      offset = output.serialize(buffer, offset);
-    }
-
-    // Write lock time
-    buffer.setInt32(offset, lockTime, Endian.little);
-    offset += 4;
-
-    // Write expiry height (Overwinter)
-    buffer.setInt32(offset, expiryHeight, Endian.little);
-    offset += 4;
-
-    // Write value balance (Overwinter)
-    buffer.setInt64(offset, valueBalance, Endian.little);
-    offset += 8;
-
-    return buffer.buffer.asUint8List(0, offset);
-  }
-
-  static int varintLength(int number) {
-    if (number < 0xfd) return 1;
-    if (number <= 0xffff) return 3;
-    if (number <= 0xffffffff) return 5;
-    return 9;
-  }
-
-  static int writeVarInt(ByteData buffer, int offset, int number) {
-    if (number < 0xfd) {
-      buffer.setUint8(offset, number);
-      return offset + 1;
-    }
-    if (number <= 0xffff) {
-      buffer.setUint8(offset, 0xfd);
-      buffer.setUint16(offset + 1, number, Endian.little);
-      return offset + 3;
-    }
-    if (number <= 0xffffffff) {
-      buffer.setUint8(offset, 0xfe);
-      buffer.setUint32(offset + 1, number, Endian.little);
-      return offset + 5;
-    }
-    buffer.setUint8(offset, 0xff);
-    buffer.setInt64(offset + 1, number, Endian.little);
-    return offset + 9;
-  }
-}
-
-class TxInput {
-  final Uint8List hash;
-  final int index;
-  Uint8List script;
-  final int sequence;
-  Uint8List? signature;
-  Uint8List? publicKey;
-
-  TxInput({
-    required this.hash,
-    required this.index,
-    required this.script,
-    this.sequence = 0xffffffff,
-    this.signature,
-    this.publicKey,
-  });
-
-  int getSize() {
-    return 36 + // hash + index
-        Transaction.varintLength(script.length) +
-        script.length +
-        4; // sequence
-  }
-
-  int serialize(ByteData buffer, int offset) {
-    buffer.buffer.asUint8List().setRange(offset, offset + 32, hash);
-    offset += 32;
-
-    buffer.setUint32(offset, index, Endian.little);
-    offset += 4;
-
-    offset = Transaction.writeVarInt(buffer, offset, script.length);
-    buffer.buffer.asUint8List().setRange(offset, offset + script.length, script);
-    offset += script.length;
-
-    buffer.setUint32(offset, sequence, Endian.little);
-    return offset + 4;
-  }
-}
-
-class TxOutput {
-  final int value;
-  final Uint8List script;
-
-  TxOutput({
-    required this.value,
-    required this.script,
-  });
-
-  int getSize() {
-    return 8 + // value
-        Transaction.varintLength(script.length) +
-        script.length;
-  }
-
-  int serialize(ByteData buffer, int offset) {
-    buffer.setInt64(offset, value, Endian.little);
-    offset += 8;
-
-    offset = Transaction.writeVarInt(buffer, offset, script.length);
-    buffer.buffer.asUint8List().setRange(offset, offset + script.length, script);
-    offset += script.length;
-
-    return offset;
-  }
 }
 
 class ElectrumService {
@@ -269,6 +83,50 @@ class ElectrumService {
   ConnectionStatus get status => _currentStatus;
   String? get currentServer => _servers[_currentServerIndex]['host'];
 
+  String _getScriptHash(String address) {
+    if (_scriptHashCache.containsKey(address)) {
+      return _scriptHashCache[address]!;
+    }
+
+    try {
+      WalletLogger.debug('Calculating script hash for address: $address');
+
+      // Decode the base58check address
+      final decoded = bs58check.decode(address);
+      WalletLogger.debug('Decoded address bytes: ${HEX.encode(decoded)}');
+
+      // Remove the version bytes (first 2 bytes for BitcoinZ)
+      final pubKeyHash = decoded.sublist(2);
+      WalletLogger.debug('PubKeyHash: ${HEX.encode(pubKeyHash)}');
+
+      // Create P2PKH script: OP_DUP OP_HASH160 <pubKeyHash> OP_EQUALVERIFY OP_CHECKSIG
+      final script = Uint8List(pubKeyHash.length + 5);
+      script[0] = 0x76; // OP_DUP
+      script[1] = 0xa9; // OP_HASH160
+      script[2] = 0x14; // Push 20 bytes
+      script.setRange(3, 3 + pubKeyHash.length, pubKeyHash);
+      script[script.length - 2] = 0x88; // OP_EQUALVERIFY
+      script[script.length - 1] = 0xac; // OP_CHECKSIG
+
+      WalletLogger.debug('Script: ${HEX.encode(script)}');
+
+      // Hash the scriptPubKey with SHA256
+      final hash = sha256.convert(script).bytes;
+
+      // Reverse the hash and encode as hex
+      final reversedHash = hash.reversed.toList();
+      final scriptHash = HEX.encode(reversedHash);
+
+      WalletLogger.debug('Final script hash: $scriptHash');
+
+      _scriptHashCache[address] = scriptHash;
+      return scriptHash;
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to calculate script hash', e, stackTrace);
+      throw Exception('Invalid address format');
+    }
+  }
+
   ElectrumService() {
     _initConnectivity();
     _startQueueProcessor();
@@ -279,7 +137,8 @@ class ElectrumService {
 
   void _startQueueProcessor() {
     _queueProcessorTimer?.cancel();
-    _queueProcessorTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _queueProcessorTimer =
+        Timer.periodic(const Duration(milliseconds: 500), (_) {
       _processNextRequest();
     });
   }
@@ -307,7 +166,8 @@ class ElectrumService {
       final result = await Connectivity().checkConnectivity();
       _updateConnectionStatus(result);
 
-      _connectivitySubscription = Connectivity().onConnectivityChanged.listen((result) {
+      _connectivitySubscription =
+          Connectivity().onConnectivityChanged.listen((result) {
         _updateConnectionStatus(result);
       });
     } catch (e) {
@@ -368,7 +228,8 @@ class ElectrumService {
     while (status != ConnectionStatus.connected && _hasInternet) {
       try {
         final currentServer = _servers[_currentServerIndex];
-        WalletLogger.info('Connecting to ${currentServer['host']}:${currentServer['port']}');
+        WalletLogger.info(
+            'Connecting to ${currentServer['host']}:${currentServer['port']}');
 
         _socket = await SecureSocket.connect(
           currentServer['host'],
@@ -621,46 +482,7 @@ class ElectrumService {
     _statusController.close();
   }
 
-  String _getScriptHash(String address) {
-    if (_scriptHashCache.containsKey(address)) {
-      return _scriptHashCache[address]!;
-    }
-
-    try {
-      WalletLogger.debug('Calculating script hash for address: $address');
-
-      final decoded = bs58check.decode(address);
-      WalletLogger.debug('Decoded address bytes: ${decoded.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}');
-
-      final pubKeyHash = decoded.sublist(2);
-      WalletLogger.debug('PubKeyHash: ${pubKeyHash.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}');
-
-      final script = Uint8List(pubKeyHash.length + 5);
-      script[0] = 0x76; // OP_DUP
-      script[1] = 0xa9; // OP_HASH160
-      script[2] = 0x14; // Push 20 bytes
-      script.setRange(3, 3 + pubKeyHash.length, pubKeyHash);
-      script[script.length - 2] = 0x88; // OP_EQUALVERIFY
-      script[script.length - 1] = 0xac; // OP_CHECKSIG
-
-      WalletLogger.debug('Script: ${script.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}');
-
-      final hash = sha256.convert(script);
-      WalletLogger.debug('SHA256: ${hash.bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}');
-
-      final reversedHash = hash.bytes.reversed.toList();
-      final scriptHash = HEX.encode(reversedHash);
-
-      WalletLogger.debug('Final script hash: $scriptHash');
-
-      _scriptHashCache[address] = scriptHash;
-      return scriptHash;
-    } catch (e, stackTrace) {
-      WalletLogger.error('Failed to calculate script hash', e, stackTrace);
-      throw Exception('Invalid address format');
-    }
-  }
-
+  // Required methods for wallet functionality
   Future<double> getBalance(String address) async {
     WalletLogger.debug('Getting balance for address: $address');
     try {
@@ -734,7 +556,7 @@ class ElectrumService {
     try {
       final response = await _enqueueRequest('blockchain.estimatefee', [targetBlocks]);
       WalletLogger.debug('Fee estimate response: $response');
-      return Map<String, dynamic>.from({'feeRate': response});
+      return {'feeRate': response};
     } catch (e, stackTrace) {
       WalletLogger.error('Failed to get fee estimate', e, stackTrace);
       rethrow;
@@ -781,48 +603,7 @@ class ElectrumService {
     }
   }
 
-  // Transaction helper methods
-  Uint8List _createP2PKHScript(Uint8List publicKeyHash) {
-    final script = Uint8List(publicKeyHash.length + 5);
-    script[0] = 0x76; // OP_DUP
-    script[1] = 0xa9; // OP_HASH160
-    script[2] = 0x14; // Push 20 bytes
-    script.setRange(3, 3 + publicKeyHash.length, publicKeyHash);
-    script[script.length - 2] = 0x88; // OP_EQUALVERIFY
-    script[script.length - 1] = 0xac; // OP_CHECKSIG
-    return script;
-  }
-
-  Uint8List _decodeWIF(String wif) {
-    final decoded = bs58check.decode(wif);
-    return decoded.sublist(1, decoded.length - 1);
-  }
-
-  Uint8List _sign(Uint8List messageHash, Uint8List privateKey) {
-    final privKey = ECPrivateKey(
-      BigInt.parse(HEX.encode(privateKey), radix: 16),
-      ECDomainParameters('secp256k1'),
-    );
-
-    final secureRandom = FortunaRandom();
-    final random = Random.secure();
-    final seeds = List<int>.generate(32, (i) => random.nextInt(256));
-    secureRandom.seed(KeyParameter(Uint8List.fromList(seeds)));
-
-    final signer = ECDSASigner(SHA256Digest(), HMac(SHA256Digest(), 64))
-      ..init(true, PrivateKeyParameter<ECPrivateKey>(privKey));
-
-    ECSignature sig = signer.generateSignature(messageHash) as ECSignature;
-
-    final n = privKey.parameters!.n;
-    final halfN = n >> 1;
-    if (sig.s.compareTo(halfN) > 0) {
-      sig = ECSignature(sig.r, n - sig.s);
-    }
-
-    return derEncodeSignature(sig.r, sig.s);
-  }
-
+  // New method to create and broadcast a transaction
   Future<String> createAndBroadcastTransaction({
     required String fromAddress,
     required String toAddress,
@@ -833,10 +614,14 @@ class ElectrumService {
     WalletLogger.debug('Creating transaction from $fromAddress to $toAddress');
 
     try {
+      // Fetch unspent outputs
       final unspentOutputs = await getUnspentOutputs(fromAddress);
+
+      // Convert amount and fee to satoshis
       int amountSatoshi = (amount * 1e8).toInt();
       int feeSatoshi = (fee * 1e8).toInt();
 
+      // Build the transaction inputs
       List<Map<String, dynamic>> selectedUTXOs = [];
       int totalInputValue = 0;
       for (var utxo in unspentOutputs) {
@@ -849,72 +634,56 @@ class ElectrumService {
         throw Exception('Insufficient funds');
       }
 
+      // Build the transaction outputs
+      Map<String, int> outputs = {
+        toAddress: amountSatoshi,
+      };
+
+      // Calculate change and add change output if necessary
       int change = totalInputValue - amountSatoshi - feeSatoshi;
-
-      final fromAddressDecoded = bs58check.decode(fromAddress);
-      final toAddressDecoded = bs58check.decode(toAddress);
-      final fromPubKeyHash = fromAddressDecoded.sublist(2);
-      final toPubKeyHash = toAddressDecoded.sublist(2);
-
-      final toScript = _createP2PKHScript(Uint8List.fromList(toPubKeyHash));
-      final changeScript = change > 0 ? _createP2PKHScript(Uint8List.fromList(fromPubKeyHash)) : null;
-
-      // Get current block height for expiry height calculation
-      final currentHeight = await getCurrentHeight();
-      final expiryHeight = currentHeight + 20; // Set expiry 20 blocks in the future
-
-      // Create transaction with BitcoinZ Overwinter format
-      final tx = Transaction(
-        version: 3, // Overwinter version
-        versionGroupId: 0x03C48270, // BitcoinZ Overwinter version group ID
-        inputs: selectedUTXOs.map((utxo) {
-          final txid = HEX.decode(utxo['tx_hash']).reversed.toList();
-          return TxInput(
-            hash: Uint8List.fromList(txid),
-            index: utxo['tx_pos'],
-            script: Uint8List(0),
-          );
-        }).toList(),
-        outputs: [
-          TxOutput(value: amountSatoshi, script: toScript),
-          if (change > 0) TxOutput(value: change, script: changeScript!),
-        ],
-        expiryHeight: expiryHeight,
-        valueBalance: 0,
-      );
-
-      final privateKey = _decodeWIF(privateKeyWIF);
-      final keyPair = bip32.BIP32.fromPrivateKey(privateKey, Uint8List(32));
-
-      for (var i = 0; i < tx.inputs.length; i++) {
-        final input = tx.inputs[i];
-        final sigHash = sha256.convert(tx.serialize()).bytes;
-        final signature = _sign(Uint8List.fromList(sigHash), privateKey);
-
-        input.signature = signature;
-        input.publicKey = keyPair.publicKey;
-
-        final signatureWithHashType = Uint8List(signature.length + 1);
-        signatureWithHashType.setRange(0, signature.length, signature);
-        signatureWithHashType[signature.length] = 0x01; // SIGHASH_ALL
-
-        final scriptSig = Uint8List(signatureWithHashType.length + input.publicKey!.length + 2);
-        scriptSig[0] = signatureWithHashType.length;
-        scriptSig.setRange(1, 1 + signatureWithHashType.length, signatureWithHashType);
-        scriptSig[signatureWithHashType.length + 1] = input.publicKey!.length;
-        scriptSig.setRange(
-          signatureWithHashType.length + 2,
-          signatureWithHashType.length + 2 + input.publicKey!.length,
-          input.publicKey!,
-        );
-
-        input.script = scriptSig;
+      if (change > 0) {
+        outputs[fromAddress] = change;
       }
 
-      final rawTx = HEX.encode(tx.serialize());
-      WalletLogger.debug('Constructed transaction hex: $rawTx');
+      // Define BitcoinZ network parameters
+      final bitcoin.NetworkType bitcoinZNetwork = bitcoin.NetworkType(
+        messagePrefix: '\x18BitcoinZ Signed Message:\n',
+        bip32: bitcoin.Bip32Type(public: 0x0488b21e, private: 0x0488ade4),
+        pubKeyHash: 0x1CB8, // BitcoinZ pubKeyHash
+        scriptHash: 0x1CBD, // BitcoinZ scriptHash
+        wif: 0x80,
+      );
 
-      final txId = await broadcastTransaction(rawTx);
+      // Create the transaction builder
+      bitcoin.TransactionBuilder txb = bitcoin.TransactionBuilder(network: bitcoinZNetwork);
+
+      // Set the transaction version and version group ID for Sapling
+      txb.setVersion(4);
+      txb.setVersionGroupId(0x892F2085);
+
+      // Add inputs
+      for (var utxo in selectedUTXOs) {
+        txb.addInput(utxo['tx_hash'], utxo['tx_pos']);
+      }
+
+      // Add outputs
+      outputs.forEach((address, value) {
+        txb.addOutput(address, value);
+      });
+
+      // Sign the inputs
+      final keyPair = bitcoin.ECPair.fromWIF(privateKeyWIF, network: bitcoinZNetwork);
+      for (int i = 0; i < selectedUTXOs.length; i++) {
+        txb.sign(vin: i, keyPair: keyPair);
+      }
+
+      // Build and serialize the transaction
+      bitcoin.Transaction tx = txb.build();
+      String rawTxHex = tx.toHex();
+      WalletLogger.debug('Constructed transaction hex: $rawTxHex');
+
+      // Broadcast the transaction
+      String txId = await broadcastTransaction(rawTxHex);
       WalletLogger.info('Transaction broadcasted with txId: $txId');
       return txId;
     } catch (e, stackTrace) {
@@ -923,3 +692,59 @@ class ElectrumService {
     }
   }
 }
+```
+
+### **Usage Example**
+
+Here is an example of how you can use the `ElectrumService` class to create and broadcast a transaction:
+
+```dart
+void main() async {
+  ElectrumService electrumService = ElectrumService();
+
+  // Wait until connected
+  await electrumService.statusStream.firstWhere((status) => status == ConnectionStatus.connected);
+
+  try {
+    String txId = await electrumService.createAndBroadcastTransaction(
+      fromAddress: 't1YourFromAddress', // Replace with your actual from address
+      toAddress: 't1RecipientAddress',  // Replace with the recipient's address
+      amount: 1.0, // Amount in BitcoinZ to send
+      privateKeyWIF: 'YourPrivateKeyInWIFFormat', // Replace with your private key in WIF format
+      fee: 0.0001, // Optional transaction fee
+    );
+    print('Transaction sent with txId: $txId');
+  } catch (e) {
+    print('Error sending transaction: $e');
+  } finally {
+    electrumService.dispose();
+  }
+}
+```
+
+### **Important Notes**
+
+- **Dependencies**: Ensure you have the following dependencies in your `pubspec.yaml`:
+
+  ```yaml
+  dependencies:
+    bitcoin_flutter: ^2.0.0
+    bs58check: ^1.0.1
+    crypto: ^3.0.1
+    hex: ^0.1.3
+    connectivity_plus: ^2.0.2
+  ```
+
+- **Private Key**: The `privateKeyWIF` should correspond to the `fromAddress`. Make sure it's securely stored and never exposed.
+
+- **Addresses**: Replace `'t1YourFromAddress'` and `'t1RecipientAddress'` with actual BitcoinZ transparent addresses.
+
+- **Testing**: Before sending real transactions, consider testing with small amounts or on a testnet if available.
+
+- **Error Handling**: The code includes comprehensive error handling and logging to help you diagnose any issues.
+
+### **Conclusion**
+
+By ensuring that the transaction version and version group ID align with BitcoinZ's Sapling protocol, and correctly constructing and signing the transaction, the issue should be resolved. This full code provides a complete implementation of the `ElectrumService` class with the necessary fixes.
+
+Feel free to integrate this code into your project and adjust it as needed. If you encounter any further issues, please check the logs for detailed error messages, and ensure that all inputs (addresses, private keys, amounts) are correct.

@@ -28,7 +28,8 @@ Future<void> init() async {
       getTransactions: sl(),
       cryptoService: sl(),
       localDataSource: sl(),
-      electrumService: sl(), // Add ElectrumService to WalletBloc
+      electrumService: sl(),
+      transactionService: sl(), // Add TransactionService to WalletBloc
     ),
   );
 
@@ -66,8 +67,8 @@ Future<void> init() async {
   sl.registerLazySingleton(() => CryptoService());
   sl.registerLazySingleton(
     () => TransactionService(
-      cryptoService: sl(),
       electrumService: sl(),
+      cryptoService: sl(),
     ),
   );
 

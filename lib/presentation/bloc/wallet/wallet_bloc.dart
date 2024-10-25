@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:my_btcz_wallet/core/crypto/crypto_service.dart';
+import 'package:my_btcz_wallet/core/network/connection_status.dart';
 import 'package:my_btcz_wallet/core/network/electrum_service.dart';
 import 'package:my_btcz_wallet/core/utils/logger.dart';
 import 'package:my_btcz_wallet/data/datasources/wallet_local_data_source.dart';
@@ -13,6 +14,7 @@ import 'package:my_btcz_wallet/domain/usecases/get_transactions.dart';
 import 'package:my_btcz_wallet/domain/usecases/restore_wallet.dart';
 import 'package:my_btcz_wallet/presentation/bloc/wallet/wallet_event.dart';
 import 'package:my_btcz_wallet/presentation/bloc/wallet/wallet_state.dart';
+import 'package:my_btcz_wallet/core/crypto/transaction_service.dart';
 
 class WalletBloc extends Bloc<WalletEvent, WalletState> {
   final CreateWallet createWallet;
@@ -22,12 +24,14 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
   final CryptoService cryptoService;
   final WalletLocalDataSource localDataSource;
   final ElectrumService electrumService;
+  final TransactionService transactionService;
   
   String? _pendingMnemonic;
   String? _pendingNotes;
   Timer? _autoUpdateTimer;
   StreamSubscription? _connectionSubscription;
   final Map<String, Map<String, dynamic>> _pendingTransactions = {};
+  Map<String, dynamic>? _pendingTransaction;
 
   WalletBloc({
     required this.createWallet,
@@ -37,6 +41,7 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
     required this.cryptoService,
     required this.localDataSource,
     required this.electrumService,
+    required this.transactionService,
   }) : super(WalletInitial()) {
     on<CreateWalletEvent>(_onCreateWallet);
     on<RestoreWalletEvent>(_onRestoreWallet);
@@ -51,6 +56,9 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
     on<StopAutoUpdateEvent>(_onStopAutoUpdate);
     on<RefreshWalletEvent>(_onRefreshWallet);
     on<UpdatePendingTransactionEvent>(_onUpdatePendingTransaction);
+    on<PrepareTransactionEvent>(_onPrepareTransaction);
+    on<ConfirmTransactionEvent>(_onConfirmTransaction);
+    on<CancelTransactionEvent>(_onCancelTransaction);
 
     _connectionSubscription = electrumService.statusStream.listen((status) {
       add(UpdateConnectionStatus(status));
@@ -77,58 +85,87 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
   }
 
   Future<void> _onCreateWallet(CreateWalletEvent event, Emitter<WalletState> emit) async {
-    if (_pendingMnemonic == null) {
-      emit(WalletError('No mnemonic generated'));
-      return;
-    }
+    try {
+      if (_pendingMnemonic == null) {
+        emit(WalletError('No mnemonic generated'));
+        return;
+      }
 
-    emit(WalletLoading());
-    final result = await createWallet(CreateWalletParams(notes: event.notes));
-    result.fold(
-      (failure) => emit(WalletError(failure.message)),
-      (wallet) async {
-        _pendingMnemonic = null;
-        _pendingNotes = null;
-        final walletModel = _convertToModel(wallet);
-        await localDataSource.saveWallet(walletModel);
-        emit(WalletCreated(walletModel));
-        electrumService.connect();
-        add(StartAutoUpdateEvent(address: wallet.address));
-      },
-    );
+      emit(WalletLoading());
+      
+      final result = await createWallet(CreateWalletParams(notes: event.notes));
+      
+      if (!emit.isDone) {
+        await result.fold(
+          (failure) async => emit(WalletError(failure.message)),
+          (wallet) async {
+            final walletModel = _convertToModel(wallet);
+            await localDataSource.saveWallet(walletModel);
+            if (!emit.isDone) {
+              emit(WalletCreated(walletModel));
+              electrumService.connect();
+              add(StartAutoUpdateEvent(address: wallet.address));
+            }
+          },
+        );
+      }
+      
+      _pendingMnemonic = null;
+      _pendingNotes = null;
+    } catch (e) {
+      if (!emit.isDone) {
+        emit(WalletError(e.toString()));
+      }
+    }
   }
 
   Future<void> _onRestoreWallet(RestoreWalletEvent event, Emitter<WalletState> emit) async {
-    emit(WalletLoading());
-    final result = await restoreWallet(RestoreWalletParams(
-      mnemonic: event.mnemonic,
-      notes: event.notes,
-    ));
-    result.fold(
-      (failure) => emit(WalletError(failure.message)),
-      (wallet) async {
-        final walletModel = _convertToModel(wallet);
-        await localDataSource.saveWallet(walletModel);
-        emit(WalletRestored(walletModel));
-        electrumService.connect();
-        add(StartAutoUpdateEvent(address: wallet.address));
-      },
-    );
+    try {
+      emit(WalletLoading());
+      
+      final result = await restoreWallet(RestoreWalletParams(
+        mnemonic: event.mnemonic,
+        notes: event.notes,
+      ));
+      
+      if (!emit.isDone) {
+        await result.fold(
+          (failure) async => emit(WalletError(failure.message)),
+          (wallet) async {
+            final walletModel = _convertToModel(wallet);
+            await localDataSource.saveWallet(walletModel);
+            if (!emit.isDone) {
+              emit(WalletRestored(walletModel));
+              electrumService.connect();
+              add(StartAutoUpdateEvent(address: wallet.address));
+            }
+          },
+        );
+      }
+    } catch (e) {
+      if (!emit.isDone) {
+        emit(WalletError(e.toString()));
+      }
+    }
   }
 
   Future<void> _onLoadWallet(LoadWalletEvent event, Emitter<WalletState> emit) async {
-    emit(WalletLoading());
     try {
+      emit(WalletLoading());
       final wallet = await localDataSource.getWallet();
-      if (wallet != null) {
-        emit(WalletLoaded(wallet));
-        electrumService.connect();
-        add(StartAutoUpdateEvent(address: wallet.address));
-      } else {
-        emit(WalletInitial());
+      if (!emit.isDone) {
+        if (wallet != null) {
+          emit(WalletLoaded(wallet));
+          electrumService.connect();
+          add(StartAutoUpdateEvent(address: wallet.address));
+        } else {
+          emit(WalletInitial());
+        }
       }
     } catch (e) {
-      emit(WalletError(e.toString()));
+      if (!emit.isDone) {
+        emit(WalletError(e.toString()));
+      }
     }
   }
 
@@ -142,23 +179,20 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
       final balance = await electrumService.getBalance(event.address);
       WalletLogger.debug('Received balance: $balance');
       
-      if (state is WalletLoaded) {
+      if (state is WalletLoaded && !emit.isDone) {
         final currentState = state as WalletLoaded;
         final updatedWallet = currentState.wallet.copyWith(
           balance: balance,
         );
         
-        // Save updated wallet to local storage
         await localDataSource.saveWallet(updatedWallet);
         
-        // Emit updated wallet state
-        emit(WalletLoaded(updatedWallet));
+        if (!emit.isDone) {
+          emit(WalletLoaded(updatedWallet));
+        }
       }
-
     } catch (e, stackTrace) {
       WalletLogger.error('Failed to get balance', e, stackTrace);
-      // Don't emit error state to avoid UI disruption
-      // Just log the error and retry on next update
     }
   }
 
@@ -172,41 +206,35 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
       final history = await electrumService.getHistory(event.address);
       WalletLogger.debug('Received transaction history: $history');
       
-      if (state is WalletLoaded) {
+      if (state is WalletLoaded && !emit.isDone) {
         final currentState = state as WalletLoaded;
         
-        // Extract transaction IDs
         final txIds = history.map((tx) => tx['tx_hash'] as String).toList();
         
-        // Update wallet with new transactions
         final updatedWallet = currentState.wallet.copyWith(
           transactions: txIds,
         );
         
-        // Save updated wallet to local storage
         await localDataSource.saveWallet(updatedWallet);
         
-        // Update pending transactions
         _pendingTransactions.clear();
         for (var tx in history) {
-          if (tx['height'] == 0 || tx['height'] == null) { // Unconfirmed transaction
+          if (tx['height'] == 0 || tx['height'] == null) {
             _pendingTransactions[tx['tx_hash']] = tx;
           }
         }
 
-        // Emit transaction state
-        emit(TransactionsLoaded(
-          transactions: history.where((tx) => tx['height'] != 0 && tx['height'] != null).toList(),
-          pendingTransactions: _pendingTransactions.values.toList(),
-        ));
-        
-        // Emit updated wallet state
-        emit(WalletLoaded(updatedWallet));
+        if (!emit.isDone) {
+          emit(TransactionsLoaded(
+            transactions: history.where((tx) => tx['height'] != 0 && tx['height'] != null).toList(),
+            pendingTransactions: _pendingTransactions.values.toList(),
+          ));
+          
+          emit(WalletLoaded(updatedWallet));
+        }
       }
     } catch (e, stackTrace) {
       WalletLogger.error('Failed to get transactions', e, stackTrace);
-      // Don't emit error state to avoid UI disruption
-      // Just log the error and retry on next update
     }
   }
 
@@ -214,11 +242,11 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
     try {
       WalletLogger.debug('Starting wallet refresh for address: ${event.address}');
       
-      // First get balance
       await _onGetBalance(GetBalanceEvent(address: event.address), emit);
       
-      // Then get transactions
-      await _onGetTransactions(GetTransactionsEvent(address: event.address), emit);
+      if (!emit.isDone) {
+        await _onGetTransactions(GetTransactionsEvent(address: event.address), emit);
+      }
       
       WalletLogger.debug('Wallet refresh completed');
     } catch (e, stackTrace) {
@@ -233,7 +261,6 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
         add(RefreshWalletEvent(address: event.address));
       }
     });
-    // Trigger immediate refresh
     add(RefreshWalletEvent(address: event.address));
   }
 
@@ -288,6 +315,83 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
 
   void _onConnectToServer(ConnectToServer event, Emitter<WalletState> emit) {
     electrumService.connect();
+  }
+
+  Future<void> _onPrepareTransaction(
+    PrepareTransactionEvent event,
+    Emitter<WalletState> emit,
+  ) async {
+    try {
+      if (electrumService.status != ConnectionStatus.connected) {
+        throw const SocketException('Not connected to Electrum server');
+      }
+
+      emit(WalletLoading());
+
+      final transactionDetails = await transactionService.createTransaction(
+        fromAddress: event.fromAddress,
+        toAddress: event.toAddress,
+        amount: event.amount,
+        privateKey: event.privateKey,
+        fee: event.fee,
+      );
+
+      _pendingTransaction = transactionDetails;
+
+      emit(TransactionPrepared(
+        transactionDetails: transactionDetails,
+        amount: event.amount,
+        fee: event.fee ?? 0.0001,
+        toAddress: event.toAddress,
+      ));
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to prepare transaction', e, stackTrace);
+      emit(WalletError(e.toString()));
+    }
+  }
+
+  Future<void> _onConfirmTransaction(
+    ConfirmTransactionEvent event,
+    Emitter<WalletState> emit,
+  ) async {
+    try {
+      if (_pendingTransaction == null) {
+        throw Exception('No pending transaction to confirm');
+      }
+
+      if (electrumService.status != ConnectionStatus.connected) {
+        throw const SocketException('Not connected to Electrum server');
+      }
+
+      emit(WalletLoading());
+
+      final txId = await transactionService.broadcastTransaction(_pendingTransaction!);
+
+      _pendingTransaction = null;
+
+      if (state is WalletLoaded) {
+        final currentState = state as WalletLoaded;
+        add(RefreshWalletEvent(address: currentState.wallet.address));
+      }
+
+      emit(TransactionConfirmed(txId));
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to confirm transaction', e, stackTrace);
+      emit(WalletError(e.toString()));
+    }
+  }
+
+  void _onCancelTransaction(
+    CancelTransactionEvent event,
+    Emitter<WalletState> emit,
+  ) {
+    _pendingTransaction = null;
+    emit(TransactionCancelled());
+    
+    if (state is WalletLoaded) {
+      final currentState = state as WalletLoaded;
+      emit(currentState);
+    }
   }
 
   @override

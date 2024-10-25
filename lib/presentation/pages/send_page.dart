@@ -80,8 +80,13 @@ class _SendPageState extends State<SendPage> {
       
       try {
         final data = await _transactionService.decodeQRCode(scanData.code!);
+        final address = data['address'];
+        if (address == null) {
+          throw const FormatException('Invalid QR code: missing address');
+        }
+        
         setState(() {
-          _addressController.text = data['address'];
+          _addressController.text = address;
           if (data['amount'] != null) {
             _amountController.text = data['amount'].toString();
           }
@@ -96,6 +101,53 @@ class _SendPageState extends State<SendPage> {
     });
   }
 
+  Future<bool> _showConfirmationDialog(Map<String, dynamic> transactionDetails) async {
+    final amount = double.parse(_amountController.text);
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirm Transaction'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Send: $amount BTCZ'),
+                const SizedBox(height: 8),
+                Text('To: ${_addressController.text}'),
+                const SizedBox(height: 8),
+                Text('Fee: $_fee BTCZ'),
+                const SizedBox(height: 16),
+                const Text(
+                  'Please verify all details carefully.\n'
+                  'Transactions cannot be reversed.',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop(false);
+              },
+            ),
+            TextButton(
+              child: const Text('Confirm'),
+              onPressed: () {
+                Navigator.of(context).pop(true);
+              },
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
+  }
+
   Future<void> _send() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -106,7 +158,9 @@ class _SendPageState extends State<SendPage> {
 
     try {
       final amount = double.parse(_amountController.text);
-      final txId = await _transactionService.createTransaction(
+      
+      // First create transaction preview
+      final transactionDetails = await _transactionService.createTransaction(
         fromAddress: widget.wallet.address,
         toAddress: _addressController.text,
         amount: amount,
@@ -116,13 +170,24 @@ class _SendPageState extends State<SendPage> {
 
       if (!mounted) return;
 
-      Navigator.pop(context, txId);
+      // Show confirmation dialog
+      final confirmed = await _showConfirmationDialog(transactionDetails);
+      
+      if (!mounted) return;
+
+      if (confirmed) {
+        // Broadcast transaction only after confirmation
+        final txId = await _transactionService.broadcastTransaction(transactionDetails);
+        if (!mounted) return;
+        Navigator.pop(context, txId);
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       setState(() {
         _error = e.toString();
-      });
-    } finally {
-      setState(() {
         _isLoading = false;
       });
     }

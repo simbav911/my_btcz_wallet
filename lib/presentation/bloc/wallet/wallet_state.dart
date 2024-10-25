@@ -1,17 +1,7 @@
-import 'package:equatable/equatable.dart';
-import 'package:my_btcz_wallet/core/network/electrum_service.dart';
+import 'package:my_btcz_wallet/core/network/connection_status.dart';
 import 'package:my_btcz_wallet/data/models/wallet_model.dart';
 
-abstract class WalletState extends Equatable {
-  final ConnectionStatus connectionStatus;
-
-  const WalletState({
-    this.connectionStatus = ConnectionStatus.disconnected,
-  });
-
-  @override
-  List<Object?> get props => [connectionStatus];
-}
+abstract class WalletState {}
 
 class WalletInitial extends WalletState {}
 
@@ -19,107 +9,81 @@ class WalletLoading extends WalletState {}
 
 class WalletCreated extends WalletState {
   final WalletModel wallet;
-
-  const WalletCreated(this.wallet);
-
-  @override
-  List<Object?> get props => [wallet, connectionStatus];
+  WalletCreated(this.wallet);
 }
 
 class WalletRestored extends WalletState {
   final WalletModel wallet;
-
-  const WalletRestored(this.wallet);
-
-  @override
-  List<Object?> get props => [wallet, connectionStatus];
+  WalletRestored(this.wallet);
 }
 
 class WalletLoaded extends WalletState {
   final WalletModel wallet;
-  final double? unconfirmedBalance;
-  final List<Map<String, dynamic>>? pendingTransactions;
+  final ConnectionStatus connectionStatus;
+  final List<Map<String, dynamic>> pendingTransactions;
 
-  const WalletLoaded(
+  WalletLoaded(
     this.wallet, {
-    this.unconfirmedBalance,
-    this.pendingTransactions,
-    ConnectionStatus connectionStatus = ConnectionStatus.disconnected,
-  }) : super(connectionStatus: connectionStatus);
+    this.connectionStatus = ConnectionStatus.disconnected,
+    this.pendingTransactions = const [],
+  });
 
   WalletLoaded copyWith({
     WalletModel? wallet,
-    double? unconfirmedBalance,
-    List<Map<String, dynamic>>? pendingTransactions,
     ConnectionStatus? connectionStatus,
+    List<Map<String, dynamic>>? pendingTransactions,
   }) {
     return WalletLoaded(
       wallet ?? this.wallet,
-      unconfirmedBalance: unconfirmedBalance ?? this.unconfirmedBalance,
-      pendingTransactions: pendingTransactions ?? this.pendingTransactions,
       connectionStatus: connectionStatus ?? this.connectionStatus,
+      pendingTransactions: pendingTransactions ?? this.pendingTransactions,
     );
   }
-
-  @override
-  List<Object?> get props => [wallet, unconfirmedBalance, pendingTransactions, connectionStatus];
 }
 
-class BalanceLoaded extends WalletState {
-  final double confirmedBalance;
-  final double unconfirmedBalance;
+class WalletError extends WalletState {
+  final String message;
+  WalletError(this.message);
+}
 
-  const BalanceLoaded({
-    required this.confirmedBalance,
-    required this.unconfirmedBalance,
-  });
+class MnemonicGenerated extends WalletState {
+  final String mnemonic;
+  MnemonicGenerated(this.mnemonic);
+}
 
-  double get totalBalance => confirmedBalance + unconfirmedBalance;
-
-  @override
-  List<Object?> get props => [confirmedBalance, unconfirmedBalance, connectionStatus];
+class MnemonicVerified extends WalletState {
+  final String mnemonic;
+  final String? notes;
+  MnemonicVerified({required this.mnemonic, this.notes});
 }
 
 class TransactionsLoaded extends WalletState {
   final List<Map<String, dynamic>> transactions;
   final List<Map<String, dynamic>> pendingTransactions;
-
-  const TransactionsLoaded({
+  TransactionsLoaded({
     required this.transactions,
     required this.pendingTransactions,
   });
-
-  @override
-  List<Object?> get props => [transactions, pendingTransactions, connectionStatus];
 }
 
-class MnemonicGenerated extends WalletState {
-  final String mnemonic;
+// New states for transaction confirmation flow
+class TransactionPrepared extends WalletState {
+  final Map<String, dynamic> transactionDetails;
+  final double amount;
+  final double fee;
+  final String toAddress;
 
-  const MnemonicGenerated(this.mnemonic);
-
-  @override
-  List<Object?> get props => [mnemonic, connectionStatus];
-}
-
-class MnemonicVerified extends WalletState {
-  final String mnemonic;
-  final String notes;
-
-  const MnemonicVerified({
-    required this.mnemonic,
-    required this.notes,
+  TransactionPrepared({
+    required this.transactionDetails,
+    required this.amount,
+    required this.fee,
+    required this.toAddress,
   });
-
-  @override
-  List<Object?> get props => [mnemonic, notes, connectionStatus];
 }
 
-class WalletError extends WalletState {
-  final String message;
-
-  const WalletError(this.message);
-
-  @override
-  List<Object?> get props => [message, connectionStatus];
+class TransactionConfirmed extends WalletState {
+  final String transactionId;
+  TransactionConfirmed(this.transactionId);
 }
+
+class TransactionCancelled extends WalletState {}

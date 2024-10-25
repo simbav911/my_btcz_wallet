@@ -1,16 +1,13 @@
-# Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
 project(my_btcz_wallet LANGUAGES CXX)
 
-# The name of the executable created for the application. Change this to change
-# the on-disk name of your application.
 set(BINARY_NAME "my_btcz_wallet")
 
-# Explicitly opt in to modern CMake behaviors to avoid warnings with recent
-# versions of CMake.
-cmake_policy(VERSION 3.14...3.25)
+cmake_policy(SET CMP0063 NEW)
 
-# Define build configuration option.
+set(CMAKE_INSTALL_RPATH "$ORIGIN/lib")
+
+# Configure build options.
 get_property(IS_MULTICONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(IS_MULTICONFIG)
   set(CMAKE_CONFIGURATION_TYPES "Debug;Profile;Release"
@@ -23,7 +20,7 @@ else()
       "Debug" "Profile" "Release")
   endif()
 endif()
-# Define settings for the Profile build mode.
+
 set(CMAKE_EXE_LINKER_FLAGS_PROFILE "${CMAKE_EXE_LINKER_FLAGS_RELEASE}")
 set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE}")
 set(CMAKE_C_FLAGS_PROFILE "${CMAKE_C_FLAGS_RELEASE}")
@@ -33,30 +30,43 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 add_definitions(-DUNICODE -D_UNICODE)
 
 # Compilation settings that should be applied to most targets.
-#
-# Be cautious about adding new options here, as plugins use this function by
-# default. In most cases, you should add new options to specific targets instead
-# of modifying this function.
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
   target_compile_options(${TARGET} PRIVATE /EHsc)
-  target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
+  target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=1")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
 
-# Flutter library and tool build rules.
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
+
+# Flutter library and tool build rules.
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
-# Application build; see runner/CMakeLists.txt.
-add_subdirectory("runner")
+# Application build
+add_executable(${BINARY_NAME} WIN32
+  "window_configuration.cpp"
+  "win32_window.cpp"
+  "run_loop.cpp"
+  "flutter_window.cpp"
+  "main.cpp"
+  "utils.cpp"
+  "runner.rc"
+  "runner.exe.manifest"
+  "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
+)
+apply_standard_settings(${BINARY_NAME})
+target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
+target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
+target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+add_dependencies(${BINARY_NAME} flutter_assemble)
 
+# Enable Data Protection API (DPAPI) for secure storage
+target_link_libraries(${BINARY_NAME} PRIVATE crypt32)
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
-
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
@@ -87,12 +97,6 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
-# Copy the native assets provided by the build.dart from all packages.
-set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
-install(DIRECTORY "${NATIVE_ASSETS_DIR}"
-   DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-   COMPONENT Runtime)
-
 # Fully re-copy the assets directory on each build to avoid having stale files
 # from a previous install.
 set(FLUTTER_ASSET_DIR_NAME "flutter_assets")
@@ -103,6 +107,7 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 
 # Install the AOT library on non-Debug builds only.
-install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
-  CONFIGURATIONS Profile;Release
-  COMPONENT Runtime)
+if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+  install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+endif()

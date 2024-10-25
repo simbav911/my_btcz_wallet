@@ -1,0 +1,179 @@
+# BitcoinZ Wallet Creation Instructions Using Komodo Wallet with Electrum Server
+
+This document outlines the technical implementation details for creating a BitcoinZ (BTCZ) wallet using Flutter and Bloc architecture, based on the Komodo Wallet framework.
+
+## 1. Seed Phrase Requirements
+
+### Implementation Details
+- Use BIP39 for generating 12-word mnemonic seed phrases
+- Seed Generation Process:
+  1. Generate secure random entropy (128 bits for 12 words)
+  2. Convert entropy to mnemonic words using BIP39 wordlist
+  3. Derive master seed using PBKDF2 with mnemonic and salt ("mnemonic" + optional passphrase)
+
+### Security Considerations
+- Store encrypted seed using platform-specific secure storage:
+  - iOS: Keychain
+  - Android: EncryptedSharedPreferences
+  - Desktop: System keyring
+- Never store raw seed phrases in plain text
+- Implement timeout-based memory clearing for seed phrases
+
+## 2. Electrum Server Configuration
+
+### Server Connection
+```dart
+class BTCZElectrumConfig {
+  static const List<String> DEFAULT_SERVERS = [
+    'electrum1.btcz.rocks:50001',
+    'electrum2.btcz.rocks:50001'
+  ];
+  
+  static const PROTOCOL_VERSION = '1.4';
+  static const COIN_NAME = 'BitcoinZ';
+  static const COIN_SYMBOL = 'BTCZ';
+}
+```
+
+### Connection Management
+1. Implement automatic server failover
+2. Use SSL/TLS for secure communication
+3. Maintain persistent connection with ping/pong heartbeat
+4. Implement exponential backoff for reconnection attempts
+
+### Data Retrieval Methods
+```dart
+class ElectrumClient {
+  Future<double> getBalance(String address);
+  Future<List<Transaction>> getHistory(String address);
+  Future<void> subscribeAddress(String address);
+  Future<void> broadcastTransaction(String rawTx);
+}
+```
+
+## 3. Wallet Creation Process
+
+### Key Generation
+```dart
+class BTCZWallet {
+  static Future<WalletKeys> generateNewWallet(String mnemonic) async {
+    final seed = await mnemonicToSeed(mnemonic);
+    final masterKey = await HDWallet.fromSeed(seed);
+    
+    // BitcoinZ derivation path (BIP44)
+    final path = "m/44'/177'/0'/0/0";
+    final childKey = masterKey.derivePath(path);
+    
+    return WalletKeys(
+      privateKey: childKey.privateKey,
+      publicKey: childKey.publicKey,
+      address: generateAddress(childKey.publicKey)
+    );
+  }
+}
+```
+
+### Address Generation
+- Use Base58Check encoding
+- BitcoinZ mainnet address prefix: 0x1CB8
+- Implement P2PKH address format
+
+## 4. Transaction Handling
+
+### Sending BTCZ
+```dart
+class TransactionBuilder {
+  Future<String> createTransaction({
+    required String fromAddress,
+    required String toAddress,
+    required double amount,
+    required double fee,
+    required String privateKey
+  });
+  
+  Future<void> signTransaction(String rawTx, String privateKey);
+  Future<String> broadcastTransaction(String signedTx);
+}
+```
+
+### Receiving BTCZ
+1. Generate new receiving address from wallet's HD path
+2. Subscribe to address updates via Electrum
+3. Implement QR code generation for addresses
+4. Store and track used addresses
+
+## 5. Balance Updates
+
+### Implementation
+```dart
+class BalanceBloc extends Cubit<BalanceState> {
+  Timer? _refreshTimer;
+  
+  Future<void> startBalanceUpdates() async {
+    // Initial balance fetch
+    await _updateBalance();
+    
+    // Set up periodic updates
+    _refreshTimer = Timer.periodic(
+      Duration(minutes: 2),
+      (_) => _updateBalance()
+    );
+  }
+  
+  Future<void> _updateBalance() async {
+    final balance = await _electrumClient.getBalance(_address);
+    emit(BalanceUpdated(balance));
+  }
+}
+```
+
+### Confirmation Handling
+- Implement minimum confirmation requirements (recommended: 6)
+- Track both confirmed and unconfirmed balances
+- Update UI when new confirmations arrive
+
+## 6. Error Handling
+
+### Network Issues
+- Implement automatic retry mechanism
+- Cache last known state for offline access
+- Show appropriate error messages to users
+
+### Transaction Failures
+- Validate transactions before broadcast
+- Handle and display meaningful error messages
+- Implement transaction replacement for stuck transactions
+
+## 7. Security Considerations
+
+1. Private Key Storage
+   - Never store raw private keys
+   - Use platform secure storage
+   - Implement encryption at rest
+
+2. Network Security
+   - Use SSL/TLS for all communications
+   - Validate server certificates
+   - Implement certificate pinning
+
+3. User Security
+   - Implement PIN/Biometric protection
+   - Auto-lock wallet after timeout
+   - Clear sensitive data from memory
+
+## 8. Testing Requirements
+
+1. Unit Tests
+   - Test address generation
+   - Test transaction building
+   - Test fee calculations
+
+2. Integration Tests
+   - Test Electrum server communication
+   - Test wallet creation flow
+   - Test transaction sending/receiving
+
+3. Security Tests
+   - Test encryption/decryption
+   - Test secure storage
+   - Test input validation

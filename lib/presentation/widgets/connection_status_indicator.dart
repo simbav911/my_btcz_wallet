@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:my_btcz_wallet/core/network/connection_status.dart';
 import 'package:my_btcz_wallet/core/network/electrum_service.dart';
 
 class ConnectionStatusIndicator extends StatelessWidget {

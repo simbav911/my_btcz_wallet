@@ -1,58 +1,106 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:my_btcz_wallet/core/theme/app_theme.dart';
 import 'package:my_btcz_wallet/presentation/bloc/wallet/wallet_bloc.dart';
 import 'package:my_btcz_wallet/presentation/bloc/wallet/wallet_event.dart';
 import 'package:my_btcz_wallet/presentation/bloc/wallet/wallet_state.dart';
 import 'package:my_btcz_wallet/presentation/pages/home_page.dart';
+import 'package:my_btcz_wallet/presentation/pages/verify_mnemonic_page.dart';
 
 class CreateWalletPage extends StatefulWidget {
-  final String mnemonic;
-
-  const CreateWalletPage({
-    super.key,
-    required this.mnemonic,
-  });
+  const CreateWalletPage({super.key});
 
   @override
   State<CreateWalletPage> createState() => _CreateWalletPageState();
 }
 
 class _CreateWalletPageState extends State<CreateWalletPage> {
-  final _formKey = GlobalKey<FormState>();
-  final _notesController = TextEditingController();
-  final List<TextEditingController> _wordControllers = [];
-  bool _showMnemonic = true;
-  bool _isVerifying = false;
+  String? _mnemonic;
+  bool _mnemonicConfirmed = false;
 
   @override
   void initState() {
     super.initState();
-    // Create controllers for each word
-    for (int i = 0; i < 24; i++) {
-      _wordControllers.add(TextEditingController());
-    }
+    // Generate mnemonic when page loads
+    context.read<WalletBloc>().add(GenerateMnemonicEvent());
   }
 
-  @override
-  void dispose() {
-    _notesController.dispose();
-    for (var controller in _wordControllers) {
-      controller.dispose();
-    }
-    super.dispose();
+  Widget _buildMnemonicWord(int index, String word) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '${index + 1}',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onPrimary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              word,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMnemonicGrid() {
+    if (_mnemonic == null) return const SizedBox();
+    
+    final words = _mnemonic!.split(' ');
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 4,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+      ),
+      itemCount: words.length,
+      itemBuilder: (context, index) => _buildMnemonicWord(index, words[index]),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create Wallet'),
+        title: const Text('Create New Wallet'),
       ),
-      body: BlocListener<WalletBloc, WalletState>(
+      body: BlocConsumer<WalletBloc, WalletState>(
         listener: (context, state) {
-          if (state is WalletCreated) {
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const HomePage()),
+          if (state is WalletCreated || state is WalletLoaded) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const HomePage()),
             );
           } else if (state is WalletError) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -60,219 +108,106 @@ class _CreateWalletPageState extends State<CreateWalletPage> {
             );
           }
         },
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Form(
-            key: _formKey,
+        builder: (context, state) {
+          if (state is MnemonicGenerated) {
+            _mnemonic = state.mnemonic;
+          }
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildSecurityWarning(),
+                Icon(
+                  Icons.security,
+                  size: 64,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(height: 24),
-                if (_showMnemonic) ...[
-                  _buildMnemonicDisplay(),
+                Text(
+                  'Recovery Phrase',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onBackground,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.error.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    "Write down these 12 words in order and keep them safe. This is your wallet's backup phrase. Never share it with anyone!",
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Theme.of(context).colorScheme.error,
+                      height: 1.5,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                if (_mnemonic != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 2,
+                      ),
+                    ),
+                    child: _buildMnemonicGrid(),
+                  ),
                   const SizedBox(height: 24),
-                  _buildContinueButton(),
-                ] else if (_isVerifying) ...[
-                  _buildMnemonicVerification(),
+                  CheckboxListTile(
+                    value: _mnemonicConfirmed,
+                    onChanged: (value) {
+                      setState(() {
+                        _mnemonicConfirmed = value ?? false;
+                      });
+                    },
+                    title: const Text(
+                      'I have written down my recovery phrase',
+                      style: TextStyle(fontSize: 16),
+                    ),
+                    activeColor: Theme.of(context).colorScheme.primary,
+                  ),
                   const SizedBox(height: 24),
-                  _buildVerifyButton(),
-                ] else ...[
-                  _buildNotesInput(),
-                  const SizedBox(height: 24),
-                  _buildCreateButton(),
-                ],
+                  ElevatedButton(
+                    onPressed: _mnemonicConfirmed
+                        ? () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => VerifyMnemonicPage(
+                                  originalMnemonic: _mnemonic!,
+                                ),
+                              ),
+                            );
+                          }
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: const Text(
+                      'Next',
+                      style: TextStyle(fontSize: 18),
+                    ),
+                  ),
+                ] else
+                  const Center(
+                    child: CircularProgressIndicator(),
+                  ),
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSecurityWarning() {
-    return Card(
-      color: Theme.of(context).colorScheme.errorContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Important Security Information',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                  ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '• Your wallet can only be restored using your recovery phrase\n'
-              '• Keep your recovery phrase in a safe, offline location\n'
-              '• Never share your private keys or recovery phrase with anyone\n'
-              '• You are the only owner of your keys and fully responsible for them',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                  ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMnemonicDisplay() {
-    final words = widget.mnemonic.split(' ');
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Recovery Phrase',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Write down these 24 words in exact order. You will need to verify them in the next step.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 16),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 4,
-            childAspectRatio: 2.5,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-          ),
-          itemCount: 24,
-          itemBuilder: (context, index) {
-            return Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).dividerColor),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text('${index + 1}. ${words[index]}'),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMnemonicVerification() {
-    final words = widget.mnemonic.split(' ');
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Verify Recovery Phrase',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Enter your recovery phrase to verify you have saved it correctly.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 16),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 4,
-            childAspectRatio: 2.5,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
-          ),
-          itemCount: 24,
-          itemBuilder: (context, index) {
-            return TextFormField(
-              controller: _wordControllers[index],
-              decoration: InputDecoration(
-                labelText: '${index + 1}',
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              ),
-              validator: (value) {
-                if (value != words[index]) {
-                  return 'Incorrect';
-                }
-                return null;
-              },
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget _buildNotesInput() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Add Notes (Optional)',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Add any notes to help you identify this wallet.',
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 16),
-        TextFormField(
-          controller: _notesController,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'Enter notes here...',
-            border: OutlineInputBorder(),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildContinueButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: () {
-          setState(() {
-            _showMnemonic = false;
-            _isVerifying = true;
-          });
+          );
         },
-        child: const Text('I Have Written Down My Recovery Phrase'),
-      ),
-    );
-  }
-
-  Widget _buildVerifyButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: () {
-          if (_formKey.currentState!.validate()) {
-            setState(() {
-              _isVerifying = false;
-            });
-          }
-        },
-        child: const Text('Verify'),
-      ),
-    );
-  }
-
-  Widget _buildCreateButton() {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: () {
-          context.read<WalletBloc>().add(
-                CreateWalletEvent(notes: _notesController.text),
-              );
-        },
-        child: const Text('Create Wallet'),
       ),
     );
   }
