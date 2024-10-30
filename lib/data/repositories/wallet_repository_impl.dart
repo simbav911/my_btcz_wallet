@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:dartz/dartz.dart';
 import 'package:hex/hex.dart';
 import 'package:my_btcz_wallet/core/crypto/crypto_service.dart';
@@ -8,6 +9,7 @@ import 'package:my_btcz_wallet/data/datasources/wallet_remote_data_source.dart';
 import 'package:my_btcz_wallet/data/models/wallet_model.dart';
 import 'package:my_btcz_wallet/domain/entities/wallet.dart';
 import 'package:my_btcz_wallet/domain/repositories/wallet_repository.dart';
+import 'package:bs58check/bs58check.dart' as bs58check;
 
 class WalletRepositoryImpl implements WalletRepository {
   final WalletLocalDataSource localDataSource;
@@ -63,43 +65,91 @@ class WalletRepositoryImpl implements WalletRepository {
   }
 
   @override
-  Future<Either<Failure, Wallet>> restoreWallet(String mnemonic, {String? notes}) async {
+  Future<Either<Failure, Wallet>> restoreWallet({String? mnemonic, String? privateKey, String? notes}) async {
     try {
-      WalletLogger.info('Restoring wallet from mnemonic...');
-      if (!cryptoService.validateMnemonic(mnemonic)) {
-        WalletLogger.warning('Invalid mnemonic phrase provided');
+      WalletLogger.info('Restoring wallet...');
+      if (mnemonic != null) {
+        WalletLogger.info('Restoring wallet from mnemonic...');
+        if (!cryptoService.validateMnemonic(mnemonic)) {
+          WalletLogger.warning('Invalid mnemonic phrase provided');
+          return Left(WalletFailure(
+            message: 'Invalid mnemonic phrase',
+            code: 'INVALID_MNEMONIC',
+          ));
+        }
+
+        final masterKey = cryptoService.generateMasterKey(mnemonic);
+        WalletLogger.debug('Generated master key from mnemonic');
+
+        final derivedPrivateKey = cryptoService.derivePrivateKey(masterKey, 0, 0);
+        WalletLogger.debug('Derived private key');
+
+        final publicKey = cryptoService.generatePublicKey(derivedPrivateKey);
+        WalletLogger.debug('Generated public key');
+
+        final address = cryptoService.generateAddress(publicKey);
+        WalletLogger.info('Generated BitcoinZ address: $address');
+
+        final wallet = WalletModel(
+          address: address,
+          balance: 0.0,
+          transactions: [],
+          isInitialized: true,
+          privateKey: HEX.encode(derivedPrivateKey),
+          publicKey: HEX.encode(publicKey),
+          mnemonic: mnemonic,
+          notes: notes ?? '',
+        );
+
+        await localDataSource.saveWallet(wallet);
+        WalletLogger.info('Restored wallet saved successfully');
+        return Right(wallet);
+      } else if (privateKey != null) {
+        WalletLogger.info('Restoring wallet from private key...');
+        WalletLogger.debug('Private key being used: $privateKey');
+
+        Uint8List privateKeyBytes;
+        if (privateKey.length == 64 && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(privateKey)) {
+          // Raw hexadecimal private key
+          privateKeyBytes = Uint8List.fromList(HEX.decode(privateKey));
+        } else if (privateKey.length == 52 && privateKey.startsWith('L') || privateKey.startsWith('K')) {
+          // WIF private key
+          privateKeyBytes = bs58check.decode(privateKey).sublist(1, 33);
+        } else {
+          WalletLogger.warning('Invalid private key format provided');
+          return Left(WalletFailure(
+            message: 'Invalid private key format',
+            code: 'INVALID_PRIVATE_KEY_FORMAT',
+          ));
+        }
+
+        final publicKey = cryptoService.generatePublicKey(privateKeyBytes);
+        WalletLogger.debug('Generated public key from private key');
+
+        final address = cryptoService.generateAddress(publicKey);
+        WalletLogger.info('Generated BitcoinZ address: $address');
+
+        final wallet = WalletModel(
+          address: address,
+          balance: 0.0,
+          transactions: [],
+          isInitialized: true,
+          privateKey: privateKey,
+          publicKey: HEX.encode(publicKey),
+          mnemonic: '',
+          notes: notes ?? '',
+        );
+
+        await localDataSource.saveWallet(wallet);
+        WalletLogger.info('Restored wallet saved successfully');
+        return Right(wallet);
+      } else {
+        WalletLogger.warning('No mnemonic or private key provided for wallet restoration');
         return Left(WalletFailure(
-          message: 'Invalid mnemonic phrase',
-          code: 'INVALID_MNEMONIC',
+          message: 'No mnemonic or private key provided for wallet restoration',
+          code: 'NO_RESTORATION_DATA',
         ));
       }
-
-      final masterKey = cryptoService.generateMasterKey(mnemonic);
-      WalletLogger.debug('Generated master key from mnemonic');
-
-      final privateKey = cryptoService.derivePrivateKey(masterKey, 0, 0);
-      WalletLogger.debug('Derived private key');
-
-      final publicKey = cryptoService.generatePublicKey(privateKey);
-      WalletLogger.debug('Generated public key');
-
-      final address = cryptoService.generateAddress(publicKey);
-      WalletLogger.info('Generated BitcoinZ address: $address');
-
-      final wallet = WalletModel(
-        address: address,
-        balance: 0.0,
-        transactions: [],
-        isInitialized: true,
-        privateKey: HEX.encode(privateKey),
-        publicKey: HEX.encode(publicKey),
-        mnemonic: mnemonic,
-        notes: notes ?? '',
-      );
-
-      await localDataSource.saveWallet(wallet);
-      WalletLogger.info('Restored wallet saved successfully');
-      return Right(wallet);
     } catch (e, stackTrace) {
       WalletLogger.error('Failed to restore wallet', e, stackTrace);
       return Left(WalletFailure(

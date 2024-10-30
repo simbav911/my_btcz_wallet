@@ -4,11 +4,13 @@ import 'package:my_btcz_wallet/domain/entities/wallet.dart';
 import 'package:my_btcz_wallet/domain/repositories/wallet_repository.dart';
 
 class RestoreWalletParams {
-  final String mnemonic;
+  final String? mnemonic;
+  final String? privateKey;
   final String? notes;
 
   RestoreWalletParams({
-    required this.mnemonic,
+    this.mnemonic,
+    this.privateKey,
     this.notes,
   });
 }
@@ -19,6 +21,10 @@ class RestoreWallet {
   RestoreWallet(this.repository);
 
   Future<Either<Failure, Wallet>> call(RestoreWalletParams params) async {
-    return await repository.restoreWallet(params.mnemonic, notes: params.notes);
+    return await repository.restoreWallet(
+      mnemonic: params.mnemonic,
+      privateKey: params.privateKey,
+      notes: params.notes,
+    );
   }
 }

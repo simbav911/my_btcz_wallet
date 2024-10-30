@@ -125,6 +125,7 @@ class WalletBloc extends Bloc<WalletEvent, WalletState> {
       
       final result = await restoreWallet(RestoreWalletParams(
         mnemonic: event.mnemonic,
+        privateKey: event.privateKey,
         notes: event.notes,
       ));
       

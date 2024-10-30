@@ -10,9 +10,10 @@ class CreateWalletEvent extends WalletEvent {
 }
 
 class RestoreWalletEvent extends WalletEvent {
-  final String mnemonic;
+  final String? mnemonic;
+  final String? privateKey;
   final String? notes;
-  const RestoreWalletEvent({required this.mnemonic, this.notes});
+  const RestoreWalletEvent({this.mnemonic, this.privateKey, this.notes});
 }
 
 class LoadWalletEvent extends WalletEvent {

@@ -16,11 +16,14 @@ class RestoreWalletPage extends StatefulWidget {
 class _RestoreWalletPageState extends State<RestoreWalletPage> {
   final _formKey = GlobalKey<FormState>();
   final _mnemonicController = TextEditingController();
+  final _privateKeyController = TextEditingController();
   bool _isValidating = false;
+  bool _isUsingPrivateKey = false;
 
   @override
   void dispose() {
     _mnemonicController.dispose();
+    _privateKeyController.dispose();
     super.dispose();
   }
 
@@ -32,7 +35,8 @@ class _RestoreWalletPageState extends State<RestoreWalletPage> {
       
       context.read<WalletBloc>().add(
             RestoreWalletEvent(
-              mnemonic: _mnemonicController.text.trim(),
+              mnemonic: _isUsingPrivateKey ? null : _mnemonicController.text.trim(),
+              privateKey: _isUsingPrivateKey ? _privateKeyController.text.trim() : null,
               notes: '',
             ),
           );
@@ -85,10 +89,20 @@ class _RestoreWalletPageState extends State<RestoreWalletPage> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 16),
-                const Text(
-                  'Enter your 12-word recovery phrase to restore your wallet.',
-                  style: TextStyle(fontSize: 16),
-                  textAlign: TextAlign.center,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('Use Recovery Phrase'),
+                    Switch(
+                      value: _isUsingPrivateKey,
+                      onChanged: (value) {
+                        setState(() {
+                          _isUsingPrivateKey = value;
+                        });
+                      },
+                    ),
+                    const Text('Use Private Key'),
+                  ],
                 ),
                 const SizedBox(height: 32),
                 Form(
@@ -96,39 +110,69 @@ class _RestoreWalletPageState extends State<RestoreWalletPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      TextFormField(
-                        controller: _mnemonicController,
-                        decoration: InputDecoration(
-                          labelText: 'Recovery Phrase',
-                          hintText: 'Enter your 12 words separated by spaces',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
+                      if (!_isUsingPrivateKey)
+                        TextFormField(
+                          controller: _mnemonicController,
+                          decoration: InputDecoration(
+                            labelText: 'Recovery Phrase',
+                            hintText: 'Enter your 12 words separated by spaces',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: AppTheme.primaryColor,
+                                width: 2,
+                              ),
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.vpn_key_outlined,
                               color: AppTheme.primaryColor,
-                              width: 2,
                             ),
                           ),
-                          prefixIcon: const Icon(
-                            Icons.vpn_key_outlined,
-                            color: AppTheme.primaryColor,
-                          ),
+                          maxLines: 3,
+                          textInputAction: TextInputAction.done,
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter your recovery phrase';
+                            }
+                            final words = value.trim().split(' ');
+                            if (words.length != 12) {
+                              return 'Please enter exactly 12 words';
+                            }
+                            return null;
+                          },
                         ),
-                        maxLines: 3,
-                        textInputAction: TextInputAction.done,
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter your recovery phrase';
-                          }
-                          final words = value.trim().split(' ');
-                          if (words.length != 12) {
-                            return 'Please enter exactly 12 words';
-                          }
-                          return null;
-                        },
-                      ),
+                      if (_isUsingPrivateKey)
+                        TextFormField(
+                          controller: _privateKeyController,
+                          decoration: InputDecoration(
+                            labelText: 'Private Key',
+                            hintText: 'Enter your private key',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: AppTheme.primaryColor,
+                                width: 2,
+                              ),
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.vpn_key_outlined,
+                              color: AppTheme.primaryColor,
+                            ),
+                          ),
+                          textInputAction: TextInputAction.done,
+                          validator: (value) {
+                            if (value == null || value.isEmpty) {
+                              return 'Please enter your private key';
+                            }
+                            return null;
+                          },
+                        ),
                       const SizedBox(height: 24),
                       ElevatedButton(
                         onPressed: _isValidating ? null : _restoreWallet,
@@ -156,7 +200,7 @@ class _RestoreWalletPageState extends State<RestoreWalletPage> {
                 ),
                 const SizedBox(height: 24),
                 const Text(
-                  'Make sure you are entering the correct recovery phrase. Anyone with access to this phrase can access your funds.',
+                  'Make sure you are entering the correct recovery phrase or private key. Anyone with access to this information can access your funds.',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.red,
