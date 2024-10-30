@@ -103,7 +103,27 @@ class WalletRepositoryImpl implements WalletRepository {
 
         await localDataSource.saveWallet(wallet);
         WalletLogger.info('Restored wallet saved successfully');
-        return Right(wallet);
+
+        // Fetch balance and transactions after restoring the wallet
+        final balanceResult = await getBalance(address);
+        final transactionsResult = await getTransactions(address);
+
+        return balanceResult.fold(
+          (balanceFailure) => Left(balanceFailure),
+          (balance) async {
+            return transactionsResult.fold(
+              (transactionsFailure) => Left(transactionsFailure),
+              (transactions) async {
+                final updatedWallet = wallet.copyWith(
+                  balance: balance,
+                  transactions: transactions,
+                );
+                await localDataSource.saveWallet(updatedWallet);
+                return Right(updatedWallet);
+              },
+            );
+          },
+        );
       } else if (privateKey != null) {
         WalletLogger.info('Restoring wallet from private key...');
         WalletLogger.debug('Private key being used: $privateKey');
@@ -112,7 +132,7 @@ class WalletRepositoryImpl implements WalletRepository {
         if (privateKey.length == 64 && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(privateKey)) {
           // Raw hexadecimal private key
           privateKeyBytes = Uint8List.fromList(HEX.decode(privateKey));
-        } else if (privateKey.length == 52 && privateKey.startsWith('L') || privateKey.startsWith('K')) {
+        } else if (privateKey.length == 52 && (privateKey.startsWith('L') || privateKey.startsWith('K'))) {
           // WIF private key
           privateKeyBytes = bs58check.decode(privateKey).sublist(1, 33);
         } else {
@@ -142,7 +162,27 @@ class WalletRepositoryImpl implements WalletRepository {
 
         await localDataSource.saveWallet(wallet);
         WalletLogger.info('Restored wallet saved successfully');
-        return Right(wallet);
+
+        // Fetch balance and transactions after restoring the wallet
+        final balanceResult = await getBalance(address);
+        final transactionsResult = await getTransactions(address);
+
+        return balanceResult.fold(
+          (balanceFailure) => Left(balanceFailure),
+          (balance) async {
+            return transactionsResult.fold(
+              (transactionsFailure) => Left(transactionsFailure),
+              (transactions) async {
+                final updatedWallet = wallet.copyWith(
+                  balance: balance,
+                  transactions: transactions,
+                );
+                await localDataSource.saveWallet(updatedWallet);
+                return Right(updatedWallet);
+              },
+            );
+          },
+        );
       } else {
         WalletLogger.warning('No mnemonic or private key provided for wallet restoration');
         return Left(WalletFailure(

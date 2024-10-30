@@ -29,11 +29,24 @@ class CryptoService {
   }
 
   // Convert private key to WIF format
-  String privateKeyToWIF(String privateKeyHex) {
+  String privateKeyToWIF(String privateKey) {
     try {
-      // Decode hex private key
-      final privateKeyBytes = HEX.decode(privateKeyHex);
-      return _privateKeyBytesToWIF(privateKeyBytes);
+      // Check if the private key is already in WIF format
+      if (RegExp(r'^[5KL][1-9A-HJ-NP-Za-km-z]{50,51}$').hasMatch(privateKey)) {
+        return privateKey;
+      }
+
+      // Check if the private key is a valid hexadecimal string
+      if (HEX.decode(privateKey) != null) {
+        // Decode hex private key
+        final privateKeyBytes = HEX.decode(privateKey);
+        return _privateKeyBytesToWIF(privateKeyBytes);
+      } else {
+        throw CryptoFailure(
+          message: 'Invalid private key format',
+          code: 'INVALID_PRIVATE_KEY_FORMAT',
+        );
+      }
     } catch (e) {
       throw CryptoFailure(
         message: 'Failed to convert private key to WIF: ${e.toString()}',
