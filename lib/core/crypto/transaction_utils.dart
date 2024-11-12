@@ -1,19 +1,20 @@
 import 'dart:typed_data';
-import 'package:hex/hex.dart';
+import 'package:hex/HEX.dart';
 import 'package:crypto/crypto.dart';
+import 'package:my_btcz_wallet/core/constants/bitcoinz_constants.dart';
 
 class TransactionUtils {
-  // BitcoinZ Sapling constants
-  static const int BTCZ_VERSION = 0x80000004;  // Version 4 with Overwinter bit
-  static const int BTCZ_VERSION_GROUP_ID = 0x892F2085;  // Sapling version group ID from Copay
+  // BitcoinZ Sapling protocol version (from full node parameters)
+  static const int BTCZ_VERSION = BitcoinZConstants.SAPLING_VERSION;  // 770006
+  static const int BTCZ_VERSION_GROUP_ID = 0x892F2085;  // Sapling version group ID
   static const int BTCZ_EXPIRY_OFFSET = 20;  // Number of blocks until expiry
 
-  // Network parameters from Copay
-  static const int NETWORK_MAGIC = 0x5A42;
-  static const int PUBKEY_HASH = 0x1CB8;
-  static const int SCRIPT_HASH = 0x1CBD;
-  static const int WIF_PREFIX = 0x80;
-  static const int PROTOCOL_MAGIC = 0x24e92764;
+  // Network parameters from full node
+  static const int NETWORK_MAGIC = BitcoinZConstants.MAINNET_MAGIC; // 0x24e92764
+  static const List<int> PUBKEY_HASH = BitcoinZConstants.P2PKH_VERBYTE; // [0x1C, 0xB8]
+  static const List<int> SCRIPT_HASH = BitcoinZConstants.P2SH_VERBYTE; // [0x1C, 0xBD]
+  static const List<int> WIF_PREFIX = BitcoinZConstants.SECRET_KEY_PREFIX; // [0x80]
+  static const int PROTOCOL_MAGIC = BitcoinZConstants.MAINNET_MAGIC; // 0x24e92764
 
   static Uint8List doubleSha256(Uint8List data) {
     final hash1 = sha256.convert(data);
@@ -59,19 +60,27 @@ class TransactionUtils {
     final rBytes = _bigIntToBytes(r);
     final sBytes = _bigIntToBytes(s);
 
+    // Ensure each component starts with 0x00 if the first byte is >= 0x80
     final rSeq = [0x02, rBytes.length, ...rBytes];
     final sSeq = [0x02, sBytes.length, ...sBytes];
+    
     final totalLength = rSeq.length + sSeq.length;
     return [0x30, totalLength, ...rSeq, ...sSeq];
   }
 
   static List<int> _bigIntToBytes(BigInt value) {
+    // Convert to unsigned 256-bit representation
     final bytes = value.toUnsigned(256).toRadixString(16);
-    final paddedBytes = bytes.length % 2 == 0 ? bytes : '0$bytes';
+    
+    // Ensure even length and pad to 64 characters (32 bytes)
+    final paddedBytes = bytes.padLeft(64, '0');
     final bytesList = HEX.decode(paddedBytes);
-    if (bytesList.isEmpty || (bytesList[0] & 0x80) != 0) {
+    
+    // Add leading 0x00 if the first byte is >= 0x80 to prevent sign misinterpretation
+    if (bytesList[0] >= 0x80) {
       return [0x00, ...bytesList];
     }
+    
     return bytesList;
   }
 
@@ -116,21 +125,10 @@ class TransactionUtils {
     return buffer;
   }
 
-  // Helper methods for transaction fields
-  static Uint8List writeVersion() {
-    // Version 4 with Overwinter bit (0x80000004)
-    // This already includes the fOverwintered flag in the most significant bit
-    return writeUint32LE(BTCZ_VERSION);
-  }
-
-  static Uint8List writeVersionGroupId() {
-    // Version group ID (0x892F2085) in little-endian
-    return writeUint32LE(BTCZ_VERSION_GROUP_ID);
-  }
-
   // Calculate transaction size for fee estimation
   static int calculateTransactionSize(int numInputs, int numOutputs) {
-    const baseSize = 166;  // Base transaction size from Copay
+    // Updated sizes based on Sapling transaction format
+    const baseSize = 166;  // Base transaction size including version, groupId, etc.
     const inputSize = 148; // Size per input
     const outputSize = 34; // Size per output
     return baseSize + (inputSize * numInputs) + (outputSize * numOutputs);
@@ -139,7 +137,17 @@ class TransactionUtils {
   // Calculate minimum fee based on transaction size
   static int calculateMinimumFee(int numInputs, int numOutputs) {
     final size = calculateTransactionSize(numInputs, numOutputs);
-    const feeRate = 10; // Satoshis per byte from Copay
+    const feeRate = 10; // Satoshis per byte
     return size * feeRate;
+  }
+
+  // Helper method to check if height is after Sapling activation
+  static bool isAfterSapling(int height) {
+    return height >= BitcoinZConstants.SAPLING_ACTIVATION;
+  }
+
+  // Helper method to check if height is after Overwinter activation
+  static bool isAfterOverwinter(int height) {
+    return height >= BitcoinZConstants.OVERWINTER_ACTIVATION;
   }
 }

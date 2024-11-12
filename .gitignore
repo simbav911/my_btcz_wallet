@@ -41,3 +41,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Wallet-specific sensitive files
+**/wallet_data
+**/secure_storage
+**/*.wallet
+**/*.key
+**/*.seed
+**/private_keys

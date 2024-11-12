@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:bs58check/bs58check.dart' as bs58check;
 import 'package:my_btcz_wallet/core/error/failures.dart';
 import 'package:my_btcz_wallet/core/crypto/transaction_utils.dart';
+import 'package:my_btcz_wallet/core/constants/bitcoinz_constants.dart';
 
 class TransactionScript {
   static Uint8List createOutputScript(String address) {
@@ -35,11 +36,11 @@ class TransactionScript {
     try {
       final scriptSig = BytesBuilder();
 
-      // Add signature length and signature
+      // Add signature with DER encoding and SIGHASH_ALL
       scriptSig.addByte(signature.length);
       scriptSig.add(signature);
 
-      // Add public key length and public key
+      // Add public key
       scriptSig.addByte(publicKey.length);
       scriptSig.add(publicKey);
 
@@ -142,13 +143,24 @@ class TransactionScript {
       final pubKeyLength = scriptSig[offset++];
       final publicKey = scriptSig.sublist(offset, offset + pubKeyLength);
 
-      // Verify signature length
+      // Verify signature length (DER encoding + SIGHASH_ALL)
       if (signature.length < 70 || signature.length > 73) {
         return false;
       }
 
-      // Verify public key length (compressed)
-      if (publicKey.length != 33) {
+      // Verify public key length (compressed or uncompressed)
+      if (publicKey.length != 33 && publicKey.length != 65) {
+        return false;
+      }
+
+      // Verify public key prefix for compressed keys
+      if (publicKey.length == 33 && 
+          (publicKey[0] != 0x02 && publicKey[0] != 0x03)) {
+        return false;
+      }
+
+      // Verify public key prefix for uncompressed keys
+      if (publicKey.length == 65 && publicKey[0] != 0x04) {
         return false;
       }
 

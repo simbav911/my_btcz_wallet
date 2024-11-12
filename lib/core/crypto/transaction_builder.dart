@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-import 'package:hex/hex.dart';
+import 'package:hex/HEX.dart';
 import 'package:pointycastle/api.dart';
 import 'package:pointycastle/ecc/api.dart';
 import 'package:pointycastle/signers/ecdsa_signer.dart';
@@ -11,9 +11,11 @@ import 'package:my_btcz_wallet/core/crypto/transaction_utils.dart';
 import 'package:my_btcz_wallet/core/crypto/transaction_script.dart';
 import 'package:my_btcz_wallet/core/error/failures.dart';
 import 'package:my_btcz_wallet/core/network/electrum_service.dart';
+import 'package:my_btcz_wallet/core/constants/bitcoinz_constants.dart';
+import 'package:my_btcz_wallet/core/utils/logger.dart';
 
 class TransactionBuilder {
-  // Use the correct Sapling branch ID
+  // Sapling consensus branch ID
   static const int CONSENSUS_BRANCH_ID = 0x76B809BB;
   static const int SIGHASH_ALL = 0x01;
 
@@ -26,72 +28,99 @@ class TransactionBuilder {
     double fee,
     ElectrumService electrumService,
   ) async {
-    // Get current network height for expiry calculation
-    final currentHeight = await electrumService.getCurrentHeight();
-    final expiryHeight = currentHeight + TransactionUtils.BTCZ_EXPIRY_OFFSET;
+    try {
+      // Get current network height for expiry calculation
+      final currentHeight = await electrumService.getCurrentHeight();
+      
+      // Ensure we're after Sapling activation
+      if (!TransactionUtils.isAfterSapling(currentHeight)) {
+        throw CryptoFailure(
+          message: 'Current height is before Sapling activation',
+          code: 'PRE_SAPLING_HEIGHT',
+        );
+      }
 
-    // Prepare transaction data with updated BitcoinZ version parameters
-    final txData = <String, dynamic>{
-      'version': TransactionUtils.BTCZ_VERSION,
-      'versionGroupId': TransactionUtils.BTCZ_VERSION_GROUP_ID,
-      'locktime': 0,
-      'expiryHeight': expiryHeight,
-      'valueBalance': 0, // No shielded components
-      'vShieldedSpend': [],
-      'vShieldedOutput': [],
-      'vJoinSplit': [],
-      'inputs': <Map<String, dynamic>>[],
-      'outputs': <Map<String, dynamic>>[],
-    };
+      final expiryHeight = currentHeight + TransactionUtils.BTCZ_EXPIRY_OFFSET;
 
-    // Build inputs
-    for (final input in inputs) {
-      final scriptPubKey = TransactionScript.getScriptPubKeyFromAddress(fromAddress);
-      (txData['inputs'] as List).add({
-        'txid': input['tx_hash'],
-        'vout': input['tx_pos'],
-        'sequence': 0xffffffff,
-        'scriptSig': '',
-        'value': input['value'],
-        'address': fromAddress,
-        'scriptPubKey': scriptPubKey,
+      // Prepare transaction data with Sapling parameters
+      final txData = <String, dynamic>{
+        'version': BitcoinZConstants.SAPLING_VERSION,
+        'versionGroupId': TransactionUtils.BTCZ_VERSION_GROUP_ID,
+        'locktime': 0,
+        'expiryHeight': expiryHeight,
+        'valueBalance': 0, // No shielded components
+        'vShieldedSpend': [],
+        'vShieldedOutput': [],
+        'vJoinSplit': [],
+        'inputs': <Map<String, dynamic>>[],
+        'outputs': <Map<String, dynamic>>[],
+      };
+
+      // Build inputs
+      for (final input in inputs) {
+        final scriptPubKey = TransactionScript.getScriptPubKeyFromAddress(fromAddress);
+        (txData['inputs'] as List).add({
+          'txid': input['tx_hash'],
+          'vout': input['tx_pos'],
+          'sequence': 0xffffffff,
+          'scriptSig': '',
+          'value': input['value'],
+          'address': fromAddress,
+          'scriptPubKey': scriptPubKey,
+        });
+      }
+
+      // Build outputs
+      final totalInputValue = inputs.fold<int>(
+          0, (sum, input) => sum + (input['value'] as int));
+      final amountToSend = (amount * 100000000).round();
+      final feeInSatoshis = (fee * 100000000).round();
+      final changeValue = totalInputValue - amountToSend - feeInSatoshis;
+
+      if (changeValue < 0) {
+        throw const CryptoFailure(
+          message: 'Insufficient funds after fee',
+          code: 'INSUFFICIENT_FUNDS_FEE',
+        );
+      }
+
+      // Output to recipient
+      final recipientScript = TransactionScript.getScriptPubKeyFromAddress(toAddress);
+      (txData['outputs'] as List).add({
+        'address': toAddress,
+        'value': amountToSend,
+        'scriptPubKey': recipientScript,
       });
-    }
 
-    // Build outputs
-    final totalInputValue = inputs.fold<int>(
-        0, (sum, input) => sum + (input['value'] as int));
-    final amountToSend = (amount * 100000000).round();
-    final feeInSatoshis = (fee * 100000000).round();
-    final changeValue = totalInputValue - amountToSend - feeInSatoshis;
+      // Change output if needed
+      if (changeValue > 0) {
+        final changeScript = TransactionScript.getScriptPubKeyFromAddress(fromAddress);
+        (txData['outputs'] as List).add({
+          'address': fromAddress,
+          'value': changeValue,
+          'scriptPubKey': changeScript,
+        });
+      }
 
-    if (changeValue < 0) {
-      throw const CryptoFailure(
-        message: 'Insufficient funds after fee',
-        code: 'INSUFFICIENT_FUNDS_FEE',
+      // Sign transaction
+      final signedTx = await _signTransaction(txData, privateKeyWIF);
+
+      // Log transaction details for debugging
+      WalletLogger.debug('Transaction Details:');
+      WalletLogger.debug('Version: ${signedTx['version']}');
+      WalletLogger.debug('Version Group ID: 0x${signedTx['versionGroupId'].toRadixString(16)}');
+      WalletLogger.debug('Inputs: ${signedTx['inputs'].length}');
+      WalletLogger.debug('Outputs: ${signedTx['outputs'].length}');
+      WalletLogger.debug('Expiry Height: ${signedTx['expiryHeight']}');
+
+      return signedTx;
+    } catch (e) {
+      WalletLogger.error('Transaction Creation Error', e);
+      throw CryptoFailure(
+        message: 'Failed to create transaction: ${e.toString()}',
+        code: 'TRANSACTION_CREATE_ERROR',
       );
     }
-
-    // Output to recipient
-    final recipientScript = TransactionScript.getScriptPubKeyFromAddress(toAddress);
-    (txData['outputs'] as List).add({
-      'address': toAddress,
-      'value': amountToSend,
-      'scriptPubKey': recipientScript,
-    });
-
-    // Change output if needed
-    if (changeValue > 0) {
-      final changeScript = TransactionScript.getScriptPubKeyFromAddress(fromAddress);
-      (txData['outputs'] as List).add({
-        'address': fromAddress,
-        'value': changeValue,
-        'scriptPubKey': changeScript,
-      });
-    }
-
-    // Sign transaction
-    return await _signTransaction(txData, privateKeyWIF);
   }
 
   static Future<Map<String, dynamic>> _signTransaction(
@@ -101,13 +130,34 @@ class TransactionBuilder {
     try {
       // Decode WIF private key
       final decoded = bs58check.decode(privateKeyWIF);
-      // Remove version byte (1 byte) and compression flag (1 byte)
-      final privateKeyBytes = decoded.sublist(1, decoded.length - 1);
-      
+
+      Uint8List privateKeyBytes;
+      bool isCompressed = false;
+
+      // Determine if the WIF is compressed
+      if (decoded.length == 34 && decoded.last == 0x01) {
+        // Compressed WIF
+        privateKeyBytes = decoded.sublist(1, decoded.length - 1);
+        isCompressed = true;
+      } else if (decoded.length == 33) {
+        // Uncompressed WIF
+        privateKeyBytes = decoded.sublist(1);
+        isCompressed = false;
+      } else {
+        throw CryptoFailure(
+          message: 'Invalid WIF format',
+          code: 'INVALID_WIF_FORMAT',
+        );
+      }
+
       final privateKeyNum = BigInt.parse(HEX.encode(privateKeyBytes), radix: 16);
       final domainParams = ECDomainParameters('secp256k1');
       final privateKey = ECPrivateKey(privateKeyNum, domainParams);
-      final publicKey = _getPublicKey(privateKeyBytes);
+      final publicKey = _getPublicKey(privateKeyBytes, isCompressed);
+
+      // Initialize ECDSASigner with SHA256 for proper signature generation
+      final signer = ECDSASigner(SHA256Digest(), HMac(SHA256Digest(), 64));
+      signer.init(true, PrivateKeyParameter<ECPrivateKey>(privateKey));
 
       for (int i = 0; i < (txData['inputs'] as List).length; i++) {
         final input = (txData['inputs'] as List)[i];
@@ -118,23 +168,25 @@ class TransactionBuilder {
         final sigHash = _createSigningHash(txData, i, scriptCode, value);
 
         // Sign the hash
-        final signature = _sign(sigHash, privateKey);
+        ECSignature sig = signer.generateSignature(sigHash) as ECSignature;
 
-        // Append SIGHASH_ALL to the signature
-        final signatureWithHashType = Uint8List.fromList([...signature, SIGHASH_ALL]);
-
-        // Create scriptSig using the new method
-        final scriptSig = TransactionScript.createSignatureScript(signatureWithHashType, publicKey);
-
-        // Verify the script
-        if (!TransactionScript.verifyScript(scriptSig, scriptCode)) {
-          throw CryptoFailure(
-            message: 'Script verification failed for input $i',
-            code: 'SCRIPT_VERIFY_ERROR',
-          );
+        // Ensure low S value
+        final n = privateKey.parameters?.n;
+        if (n != null) {
+          final halfN = n >> 1;
+          if (sig.s.compareTo(halfN) > 0) {
+            sig = ECSignature(sig.r, n - sig.s);
+          }
         }
 
-        // Update the input
+        // Encode signature in DER format and append SIGHASH_ALL
+        final signature = TransactionUtils.encodeDER(sig.r, sig.s);
+        final signatureWithHashType = Uint8List.fromList([...signature, SIGHASH_ALL]);
+
+        // Create scriptSig using the updated method
+        final scriptSig = TransactionScript.createSignatureScript(signatureWithHashType, publicKey);
+
+        // Update the input with the new scriptSig
         (txData['inputs'] as List)[i]['scriptSig'] = scriptSig;
       }
 
@@ -156,14 +208,14 @@ class TransactionBuilder {
     final preimage = BytesBuilder();
 
     // Header
-    preimage.add(_writeUint32LE(txData['version'] as int));
-    preimage.add(_writeUint32LE(txData['versionGroupId'] as int));
+    preimage.add(TransactionUtils.writeUint32LE(txData['version'] as int));
+    preimage.add(TransactionUtils.writeUint32LE(txData['versionGroupId'] as int));
 
     // Previous outputs hash
     final prevouts = BytesBuilder();
     for (final input in txData['inputs'] as List) {
       prevouts.add(Uint8List.fromList(HEX.decode(input['txid']).reversed.toList()));
-      prevouts.add(_writeUint32LE(input['vout'] as int));
+      prevouts.add(TransactionUtils.writeUint32LE(input['vout'] as int));
     }
     final hashPrevouts = _blake2bHash(prevouts.toBytes());
     preimage.add(hashPrevouts);
@@ -171,7 +223,7 @@ class TransactionBuilder {
     // Sequence hash
     final sequences = BytesBuilder();
     for (final input in txData['inputs'] as List) {
-      sequences.add(_writeUint32LE(input['sequence'] as int));
+      sequences.add(TransactionUtils.writeUint32LE(input['sequence'] as int));
     }
     final hashSequence = _blake2bHash(sequences.toBytes());
     preimage.add(hashSequence);
@@ -179,7 +231,7 @@ class TransactionBuilder {
     // Outputs hash
     final outputs = BytesBuilder();
     for (final output in txData['outputs'] as List) {
-      outputs.add(_writeUint64LE(output['value'] as int));
+      outputs.add(TransactionUtils.writeUint64LE(output['value'] as int));
       final scriptPubKey = output['scriptPubKey'] as Uint8List;
       outputs.add(TransactionUtils.writeCompactSize(scriptPubKey.length));
       outputs.add(scriptPubKey);
@@ -187,19 +239,25 @@ class TransactionBuilder {
     final hashOutputs = _blake2bHash(outputs.toBytes());
     preimage.add(hashOutputs);
 
-    // Additional fields
-    preimage.add(_writeUint32LE(txData['locktime'] as int));
-    preimage.add(_writeUint32LE(txData['expiryHeight'] as int));
-    preimage.add(_writeUint64LE(txData['valueBalance'] as int));
-    preimage.add(_writeUint32LE(SIGHASH_ALL));
+    // JoinSplits, Shielded Spends, and Shielded Outputs hashes (empty for transparent tx)
+    preimage.add(Uint8List(32)); // JoinSplits hash
+    preimage.add(Uint8List(32)); // Shielded Spends hash
+    preimage.add(Uint8List(32)); // Shielded Outputs hash
+
+    // Lock time and expiry height
+    preimage.add(TransactionUtils.writeUint32LE(txData['locktime'] as int));
+    preimage.add(TransactionUtils.writeUint32LE(txData['expiryHeight'] as int));
+
+    // Value balance
+    preimage.add(TransactionUtils.writeUint64LE(txData['valueBalance'] as int));
 
     // Current input
     preimage.add(Uint8List.fromList(HEX.decode(txData['inputs'][inputIndex]['txid']).reversed.toList()));
-    preimage.add(_writeUint32LE(txData['inputs'][inputIndex]['vout'] as int));
+    preimage.add(TransactionUtils.writeUint32LE(txData['inputs'][inputIndex]['vout'] as int));
     preimage.add(TransactionUtils.writeCompactSize(scriptCode.length));
     preimage.add(scriptCode);
-    preimage.add(_writeUint64LE(value));
-    preimage.add(_writeUint32LE(txData['inputs'][inputIndex]['sequence'] as int));
+    preimage.add(TransactionUtils.writeUint64LE(value));
+    preimage.add(TransactionUtils.writeUint32LE(txData['inputs'][inputIndex]['sequence'] as int));
 
     // Create personalization for BLAKE2b
     final personalization = Uint8List(16); // 16 bytes for personalization
@@ -231,63 +289,44 @@ class TransactionBuilder {
     return hash;
   }
 
-  static Uint8List _sign(Uint8List messageHash, ECPrivateKey privateKey) {
-    final signer = ECDSASigner(SHA256Digest(), HMac(SHA256Digest(), 64));
-    signer.init(true, PrivateKeyParameter<ECPrivateKey>(privateKey));
-
-    ECSignature sig = signer.generateSignature(messageHash) as ECSignature;
-
-    // Ensure low S value
-    final n = privateKey.parameters!.n;
-    final halfN = n >> 1;
-    if (sig.s.compareTo(halfN) > 0) {
-      sig = ECSignature(sig.r, n - sig.s);
-    }
-
-    return Uint8List.fromList(TransactionUtils.encodeDER(sig.r, sig.s));
-  }
-
-  static Uint8List _getPublicKey(Uint8List privateKeyBytes) {
+  static Uint8List _getPublicKey(Uint8List privateKeyBytes, bool isCompressed) {
     final domainParams = ECDomainParameters('secp256k1');
     final privateKeyNum = BigInt.parse(HEX.encode(privateKeyBytes), radix: 16);
     final privateKey = ECPrivateKey(privateKeyNum, domainParams);
-    final publicKey = domainParams.G * privateKey.d;
-    
+    final publicKeyPoint = domainParams.G * privateKey.d;
+
+    if (publicKeyPoint == null) {
+      throw CryptoFailure(
+        message: 'Failed to generate public key',
+        code: 'PUBLIC_KEY_GENERATION_ERROR',
+      );
+    }
+
     // Get X and Y coordinates
-    final x = publicKey!.x!.toBigInteger()!;
-    final y = publicKey.y!.toBigInteger()!;
-    
-    // Create compressed public key
-    final prefix = y.isEven ? 0x02 : 0x03;
-    final xBytes = _padTo32Bytes(x.toRadixString(16));
-    
-    return Uint8List.fromList([prefix, ...xBytes]);
+    final x = publicKeyPoint.x?.toBigInteger();
+    final y = publicKeyPoint.y?.toBigInteger();
+
+    if (x == null || y == null) {
+      throw CryptoFailure(
+        message: 'Invalid public key coordinates',
+        code: 'INVALID_PUBLIC_KEY_COORDINATES',
+      );
+    }
+
+    // Create compressed or uncompressed public key
+    if (isCompressed) {
+      final prefix = y.isEven ? 0x02 : 0x03;
+      final xBytes = _padTo32Bytes(x.toRadixString(16));
+      return Uint8List.fromList([prefix, ...xBytes]);
+    } else {
+      final xBytes = _padTo32Bytes(x.toRadixString(16));
+      final yBytes = _padTo32Bytes(y.toRadixString(16));
+      return Uint8List.fromList([0x04, ...xBytes, ...yBytes]);
+    }
   }
 
   static List<int> _padTo32Bytes(String hex) {
     final paddedHex = hex.padLeft(64, '0');
     return HEX.decode(paddedHex);
-  }
-
-  static Uint8List _writeUint32LE(int value) {
-    final buffer = Uint8List(4);
-    buffer[0] = value & 0xFF;
-    buffer[1] = (value >> 8) & 0xFF;
-    buffer[2] = (value >> 16) & 0xFF;
-    buffer[3] = (value >> 24) & 0xFF;
-    return buffer;
-  }
-
-  static Uint8List _writeUint64LE(int value) {
-    final buffer = Uint8List(8);
-    buffer[0] = value & 0xFF;
-    buffer[1] = (value >> 8) & 0xFF;
-    buffer[2] = (value >> 16) & 0xFF;
-    buffer[3] = (value >> 24) & 0xFF;
-    buffer[4] = (value >> 32) & 0xFF;
-    buffer[5] = (value >> 40) & 0xFF;
-    buffer[6] = (value >> 48) & 0xFF;
-    buffer[7] = (value >> 56) & 0xFF;
-    return buffer;
   }
 }

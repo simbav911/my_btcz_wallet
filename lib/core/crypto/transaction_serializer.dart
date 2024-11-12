@@ -1,14 +1,15 @@
 import 'dart:typed_data';
 import 'package:hex/hex.dart';
 import 'package:my_btcz_wallet/core/crypto/transaction_utils.dart';
+import 'package:my_btcz_wallet/core/constants/bitcoinz_constants.dart';
 
 class TransactionSerializer {
   static String serializeToHex(Map<String, dynamic> txData) {
     final buffer = BytesBuilder();
 
-    // Header
-    buffer.add(TransactionUtils.writeUint32LE(txData['version'] as int));
-    buffer.add(TransactionUtils.writeUint32LE(txData['versionGroupId'] as int));
+    // Header with Sapling version and version group ID
+    buffer.add(TransactionUtils.writeUint32LE(BitcoinZConstants.SAPLING_VERSION));
+    buffer.add(TransactionUtils.writeUint32LE(TransactionUtils.BTCZ_VERSION_GROUP_ID));
 
     // Inputs
     final inputs = txData['inputs'] as List;
@@ -30,7 +31,7 @@ class TransactionSerializer {
     final outputs = txData['outputs'] as List;
     buffer.add(TransactionUtils.writeCompactSize(outputs.length));
     for (final output in outputs) {
-      // Amount
+      // Amount (in satoshis)
       buffer.add(TransactionUtils.writeUint64LE(output['value'] as int));
       // ScriptPubKey
       final scriptPubKey = output['scriptPubKey'] as Uint8List;
@@ -41,19 +42,19 @@ class TransactionSerializer {
     // Locktime
     buffer.add(TransactionUtils.writeUint32LE(txData['locktime'] as int));
 
-    // Expiry height (Overwinter/Sapling)
+    // Expiry height (Sapling)
     buffer.add(TransactionUtils.writeUint32LE(txData['expiryHeight'] as int));
 
     // Value balance (Sapling)
     buffer.add(TransactionUtils.writeUint64LE(txData['valueBalance'] as int));
 
-    // Sapling spends (empty array)
+    // Sapling spends (empty array for transparent tx)
     buffer.add(TransactionUtils.writeCompactSize(0));
 
-    // Sapling outputs (empty array)
+    // Sapling outputs (empty array for transparent tx)
     buffer.add(TransactionUtils.writeCompactSize(0));
 
-    // JoinSplits (empty array)
+    // JoinSplits (empty array for transparent tx)
     buffer.add(TransactionUtils.writeCompactSize(0));
 
     return HEX.encode(buffer.toBytes());
@@ -161,7 +162,7 @@ class TransactionSerializer {
       });
     }
 
-    // Read remaining fields
+    // Read remaining Sapling fields
     txData['locktime'] = readUint32();
     txData['expiryHeight'] = readUint32();
     txData['valueBalance'] = readUint64();
