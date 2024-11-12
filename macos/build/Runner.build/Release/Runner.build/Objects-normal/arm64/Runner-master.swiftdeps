@@ -1,0 +1,9 @@
+version: "Apple Swift version 5.10 (swiftlang-5.10.0.13 clang-1500.3.9.4)"
+options: "06fd1bf6126917ddf487016f3879185b575491d90ae598806e94138f562795d3"
+build_start_time: [1730308454, 618068000]
+build_end_time: [1730308456, 479890000]
+inputs:
+  "/Users/simonas/my_btcz_wallet/macos/Flutter/GeneratedPluginRegistrant.swift": !dirty [1730308264, 135018781]
+  "/Users/simonas/my_btcz_wallet/macos/Runner/AppDelegate.swift": !dirty [1728828380, 118182985]
+  "/Users/simonas/my_btcz_wallet/macos/Runner/MainFlutterWindow.swift": !dirty [1695239371, 0]
+  "/Users/simonas/my_btcz_wallet/macos/build/Runner.build/Release/Runner.build/DerivedSources/GeneratedAssetSymbols.swift": !dirty [1730308452, 561152372]

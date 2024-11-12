@@ -3,10 +3,17 @@ import 'package:hex/hex.dart';
 import 'package:crypto/crypto.dart';
 
 class TransactionUtils {
-  // BitcoinZ Overwinter constants
-  static const int BTCZ_VERSION = 0x80000003;  // Version 3 + Overwinter bit
-  static const int BTCZ_VERSION_GROUP_ID = 0x03C48270;  // Version group ID for BitcoinZ
+  // BitcoinZ Sapling constants
+  static const int BTCZ_VERSION = 0x80000004;  // Version 4 with Overwinter bit
+  static const int BTCZ_VERSION_GROUP_ID = 0x892F2085;  // Sapling version group ID from Copay
   static const int BTCZ_EXPIRY_OFFSET = 20;  // Number of blocks until expiry
+
+  // Network parameters from Copay
+  static const int NETWORK_MAGIC = 0x5A42;
+  static const int PUBKEY_HASH = 0x1CB8;
+  static const int SCRIPT_HASH = 0x1CBD;
+  static const int WIF_PREFIX = 0x80;
+  static const int PROTOCOL_MAGIC = 0x24e92764;
 
   static Uint8List doubleSha256(Uint8List data) {
     final hash1 = sha256.convert(data);
@@ -111,22 +118,28 @@ class TransactionUtils {
 
   // Helper methods for transaction fields
   static Uint8List writeVersion() {
-    // Version 3 + Overwinter bit (0x80000003)
-    final buffer = Uint8List(4);
-    buffer[0] = 0x03;  // Version 3
-    buffer[1] = 0x00;
-    buffer[2] = 0x00;
-    buffer[3] = 0x80;  // Overwinter bit
-    return buffer;
+    // Version 4 with Overwinter bit (0x80000004)
+    // This already includes the fOverwintered flag in the most significant bit
+    return writeUint32LE(BTCZ_VERSION);
   }
 
   static Uint8List writeVersionGroupId() {
-    // Version group ID (0x03C48270) in network order
-    final buffer = Uint8List(4);
-    buffer[0] = 0x70;  // Reversed byte order
-    buffer[1] = 0x82;
-    buffer[2] = 0xC4;
-    buffer[3] = 0x03;
-    return buffer;
+    // Version group ID (0x892F2085) in little-endian
+    return writeUint32LE(BTCZ_VERSION_GROUP_ID);
+  }
+
+  // Calculate transaction size for fee estimation
+  static int calculateTransactionSize(int numInputs, int numOutputs) {
+    const baseSize = 166;  // Base transaction size from Copay
+    const inputSize = 148; // Size per input
+    const outputSize = 34; // Size per output
+    return baseSize + (inputSize * numInputs) + (outputSize * numOutputs);
+  }
+
+  // Calculate minimum fee based on transaction size
+  static int calculateMinimumFee(int numInputs, int numOutputs) {
+    final size = calculateTransactionSize(numInputs, numOutputs);
+    const feeRate = 10; // Satoshis per byte from Copay
+    return size * feeRate;
   }
 }

@@ -6,13 +6,10 @@ abstract class Failure {
     required this.message,
     required this.code,
   });
-
-  @override
-  String toString() => '$runtimeType: $message (Code: $code)';
 }
 
-class CryptoFailure extends Failure {
-  const CryptoFailure({
+class WalletFailure extends Failure {
+  const WalletFailure({
     required String message,
     required String code,
   }) : super(message: message, code: code);
@@ -20,6 +17,20 @@ class CryptoFailure extends Failure {
 
 class NetworkFailure extends Failure {
   const NetworkFailure({
+    required String message,
+    required String code,
+  }) : super(message: message, code: code);
+}
+
+class TransactionFailure extends Failure {
+  const TransactionFailure({
+    required String message,
+    required String code,
+  }) : super(message: message, code: code);
+}
+
+class CryptoFailure extends Failure {
+  const CryptoFailure({
     required String message,
     required String code,
   }) : super(message: message, code: code);
@@ -34,13 +45,6 @@ class CacheFailure extends Failure {
 
 class ServerFailure extends Failure {
   const ServerFailure({
-    required String message,
-    required String code,
-  }) : super(message: message, code: code);
-}
-
-class WalletFailure extends Failure {
-  const WalletFailure({
     required String message,
     required String code,
   }) : super(message: message, code: code);

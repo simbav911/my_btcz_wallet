@@ -29,7 +29,7 @@ Future<void> init() async {
       cryptoService: sl(),
       localDataSource: sl(),
       electrumService: sl(),
-      transactionService: sl(), // Add TransactionService to WalletBloc
+      transactionService: sl(),
     ),
   );
 
@@ -45,6 +45,7 @@ Future<void> init() async {
       localDataSource: sl(),
       remoteDataSource: sl(),
       cryptoService: sl(),
+      electrumService: sl(),
     ),
   );
 
@@ -57,7 +58,7 @@ Future<void> init() async {
 
   sl.registerLazySingleton<WalletRemoteDataSource>(
     () => WalletRemoteDataSourceImpl(
-      dio: sl(),
+      electrumService: sl(),
     ),
   );
 
@@ -88,12 +89,4 @@ Future<void> init() async {
     ),
   );
   sl.registerLazySingleton(() => secureStorage);
-  
-  sl.registerLazySingleton(() {
-    final dio = Dio();
-    dio.options.connectTimeout = const Duration(seconds: 30);
-    dio.options.receiveTimeout = const Duration(seconds: 30);
-    dio.options.validateStatus = (status) => status != null && status < 500;
-    return dio;
-  });
 }

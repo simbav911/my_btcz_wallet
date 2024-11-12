@@ -1,86 +1,176 @@
 import 'dart:typed_data';
 import 'package:hex/hex.dart';
 import 'package:my_btcz_wallet/core/crypto/transaction_utils.dart';
-import 'package:my_btcz_wallet/core/crypto/transaction_script.dart';
-import 'package:my_btcz_wallet/core/utils/logger.dart';
 
 class TransactionSerializer {
-  static Uint8List serializeTransaction(Map<String, dynamic> txData) {
+  static String serializeToHex(Map<String, dynamic> txData) {
     final buffer = BytesBuilder();
 
-    // Version (4 bytes) with Overwinter bit
-    final version = TransactionUtils.writeVersion();
-    WalletLogger.debug('Version bytes: ${HEX.encode(version)}');
-    buffer.add(version);
-
-    // Version Group ID (4 bytes)
-    final versionGroupId = TransactionUtils.writeVersionGroupId();
-    WalletLogger.debug('Version Group ID bytes: ${HEX.encode(versionGroupId)}');
-    buffer.add(versionGroupId);
+    // Header
+    buffer.add(TransactionUtils.writeUint32LE(txData['version'] as int));
+    buffer.add(TransactionUtils.writeUint32LE(txData['versionGroupId'] as int));
 
     // Inputs
     final inputs = txData['inputs'] as List;
     buffer.add(TransactionUtils.writeCompactSize(inputs.length));
-    WalletLogger.debug('Input count: ${inputs.length}');
-
     for (final input in inputs) {
-      // txid (32 bytes, reversed)
-      final txid = HEX.decode(input['txid']).reversed.toList();
-      WalletLogger.debug('Input txid: ${input['txid']} -> ${HEX.encode(txid)}');
-      buffer.add(txid);
-
-      // vout (4 bytes, little-endian)
-      final vout = TransactionUtils.writeUint32LE(input['vout'] as int);
-      WalletLogger.debug('Input vout: ${input['vout']} -> ${HEX.encode(vout)}');
-      buffer.add(vout);
-
-      // scriptSig
+      // Previous transaction hash (reversed)
+      buffer.add(Uint8List.fromList(HEX.decode(input['txid']).reversed.toList()));
+      // Output index
+      buffer.add(TransactionUtils.writeUint32LE(input['vout'] as int));
+      // ScriptSig
       final scriptSig = input['scriptSig'] as Uint8List;
       buffer.add(TransactionUtils.writeCompactSize(scriptSig.length));
       buffer.add(scriptSig);
-      WalletLogger.debug('Input scriptSig: ${HEX.encode(scriptSig)}');
-
-      // sequence (4 bytes, little-endian)
-      final sequence = TransactionUtils.writeUint32LE(input['sequence'] as int);
-      WalletLogger.debug('Input sequence: ${input['sequence']} -> ${HEX.encode(sequence)}');
-      buffer.add(sequence);
+      // Sequence
+      buffer.add(TransactionUtils.writeUint32LE(input['sequence'] as int));
     }
 
     // Outputs
     final outputs = txData['outputs'] as List;
     buffer.add(TransactionUtils.writeCompactSize(outputs.length));
-    WalletLogger.debug('Output count: ${outputs.length}');
-
     for (final output in outputs) {
-      // value (8 bytes, little-endian)
-      final value = TransactionUtils.writeUint64LE(output['value'] as int);
-      WalletLogger.debug('Output value: ${output['value']} -> ${HEX.encode(value)}');
-      buffer.add(value);
-
-      // scriptPubKey
-      final scriptPubKey = TransactionScript.createOutputScript(output['address'] as String);
+      // Amount
+      buffer.add(TransactionUtils.writeUint64LE(output['value'] as int));
+      // ScriptPubKey
+      final scriptPubKey = output['scriptPubKey'] as Uint8List;
       buffer.add(TransactionUtils.writeCompactSize(scriptPubKey.length));
       buffer.add(scriptPubKey);
-      WalletLogger.debug('Output scriptPubKey: ${HEX.encode(scriptPubKey)}');
     }
 
-    // nLockTime (4 bytes, little-endian)
-    final locktime = TransactionUtils.writeUint32LE(txData['locktime'] as int);
-    WalletLogger.debug('Locktime: ${txData['locktime']} -> ${HEX.encode(locktime)}');
-    buffer.add(locktime);
+    // Locktime
+    buffer.add(TransactionUtils.writeUint32LE(txData['locktime'] as int));
 
-    // nExpiryHeight (4 bytes, little-endian)
-    final expiryHeight = TransactionUtils.writeUint32LE(txData['expiryHeight'] as int);
-    WalletLogger.debug('Expiry height: ${txData['expiryHeight']} -> ${HEX.encode(expiryHeight)}');
-    buffer.add(expiryHeight);
+    // Expiry height (Overwinter/Sapling)
+    buffer.add(TransactionUtils.writeUint32LE(txData['expiryHeight'] as int));
 
-    final result = buffer.toBytes();
-    WalletLogger.debug('Final transaction hex: ${HEX.encode(result)}');
-    return result;
+    // Value balance (Sapling)
+    buffer.add(TransactionUtils.writeUint64LE(txData['valueBalance'] as int));
+
+    // Sapling spends (empty array)
+    buffer.add(TransactionUtils.writeCompactSize(0));
+
+    // Sapling outputs (empty array)
+    buffer.add(TransactionUtils.writeCompactSize(0));
+
+    // JoinSplits (empty array)
+    buffer.add(TransactionUtils.writeCompactSize(0));
+
+    return HEX.encode(buffer.toBytes());
   }
 
-  static String serializeToHex(Map<String, dynamic> txData) {
-    final bytes = serializeTransaction(txData);
-    return HEX.encode(bytes);
+  static Map<String, dynamic> deserializeFromHex(String hex) {
+    final data = HEX.decode(hex);
+    var offset = 0;
+
+    // Helper function to read VarInt
+    int readVarInt() {
+      final firstByte = data[offset++];
+      if (firstByte < 0xfd) {
+        return firstByte;
+      } else if (firstByte == 0xfd) {
+        final value = data[offset] | (data[offset + 1] << 8);
+        offset += 2;
+        return value;
+      } else if (firstByte == 0xfe) {
+        final value = data[offset] |
+            (data[offset + 1] << 8) |
+            (data[offset + 2] << 16) |
+            (data[offset + 3] << 24);
+        offset += 4;
+        return value;
+      } else {
+        final value = data[offset] |
+            (data[offset + 1] << 8) |
+            (data[offset + 2] << 16) |
+            (data[offset + 3] << 24) |
+            (data[offset + 4] << 32) |
+            (data[offset + 5] << 40) |
+            (data[offset + 6] << 48) |
+            (data[offset + 7] << 56);
+        offset += 8;
+        return value;
+      }
+    }
+
+    // Read 4 bytes as little-endian uint32
+    int readUint32() {
+      final value = data[offset] |
+          (data[offset + 1] << 8) |
+          (data[offset + 2] << 16) |
+          (data[offset + 3] << 24);
+      offset += 4;
+      return value;
+    }
+
+    // Read 8 bytes as little-endian uint64
+    int readUint64() {
+      final value = data[offset] |
+          (data[offset + 1] << 8) |
+          (data[offset + 2] << 16) |
+          (data[offset + 3] << 24) |
+          (data[offset + 4] << 32) |
+          (data[offset + 5] << 40) |
+          (data[offset + 6] << 48) |
+          (data[offset + 7] << 56);
+      offset += 8;
+      return value;
+    }
+
+    // Read bytes of specified length
+    Uint8List readBytes(int length) {
+      final bytes = data.sublist(offset, offset + length);
+      offset += length;
+      return Uint8List.fromList(bytes);
+    }
+
+    final txData = <String, dynamic>{
+      'version': readUint32(),
+      'versionGroupId': readUint32(),
+      'inputs': <Map<String, dynamic>>[],
+      'outputs': <Map<String, dynamic>>[],
+    };
+
+    // Read inputs
+    final numInputs = readVarInt();
+    for (var i = 0; i < numInputs; i++) {
+      final txid = HEX.encode(readBytes(32).reversed.toList());
+      final vout = readUint32();
+      final scriptLength = readVarInt();
+      final scriptSig = readBytes(scriptLength);
+      final sequence = readUint32();
+
+      txData['inputs'].add({
+        'txid': txid,
+        'vout': vout,
+        'scriptSig': scriptSig,
+        'sequence': sequence,
+      });
+    }
+
+    // Read outputs
+    final numOutputs = readVarInt();
+    for (var i = 0; i < numOutputs; i++) {
+      final value = readUint64();
+      final scriptLength = readVarInt();
+      final scriptPubKey = readBytes(scriptLength);
+
+      txData['outputs'].add({
+        'value': value,
+        'scriptPubKey': scriptPubKey,
+      });
+    }
+
+    // Read remaining fields
+    txData['locktime'] = readUint32();
+    txData['expiryHeight'] = readUint32();
+    txData['valueBalance'] = readUint64();
+
+    // Skip empty Sapling arrays
+    readVarInt(); // vShieldedSpend
+    readVarInt(); // vShieldedOutput
+    readVarInt(); // vJoinSplit
+
+    return txData;
   }
 }

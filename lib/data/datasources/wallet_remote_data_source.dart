@@ -1,6 +1,6 @@
-import 'package:dio/dio.dart';
 import 'package:my_btcz_wallet/core/error/failures.dart';
-import 'package:my_btcz_wallet/core/constants/app_constants.dart';
+import 'package:my_btcz_wallet/core/network/electrum_service.dart';
+import 'package:my_btcz_wallet/core/utils/logger.dart';
 
 abstract class WalletRemoteDataSource {
   Future<double> getBalance(String address);
@@ -9,109 +9,57 @@ abstract class WalletRemoteDataSource {
 }
 
 class WalletRemoteDataSourceImpl implements WalletRemoteDataSource {
-  final Dio dio;
-  final List<String> servers;
-  int currentServerIndex = 0;
+  final ElectrumService electrumService;
 
   WalletRemoteDataSourceImpl({
-    required this.dio,
-  }) : servers = AppConstants.electrumServers;
-
-  String get currentServer => servers[currentServerIndex];
-
-  void _rotateServer() {
-    currentServerIndex = (currentServerIndex + 1) % servers.length;
-  }
-
-  Future<T> _executeWithRetry<T>(Future<T> Function() operation) async {
-    for (var i = 0; i < servers.length; i++) {
-      try {
-        return await operation();
-      } on DioException catch (e) {
-        if (i == servers.length - 1) {
-          throw ServerFailure(
-            message: 'All servers failed: ${e.message}',
-            code: 'ALL_SERVERS_FAILED',
-          );
-        }
-        _rotateServer();
-      }
-    }
-    throw ServerFailure(
-      message: 'Unexpected error occurred',
-      code: 'UNEXPECTED_ERROR',
-    );
-  }
+    required this.electrumService,
+  });
 
   @override
   Future<double> getBalance(String address) async {
-    return _executeWithRetry(() async {
-      final response = await dio.post(
-        'https://$currentServer',
-        data: {
-          'method': 'blockchain.address.get_balance',
-          'params': [address],
-          'id': 1,
-        },
+    try {
+      WalletLogger.debug('Getting balance for address: $address');
+      final balance = await electrumService.getBalance(address);
+      WalletLogger.debug('Balance received: $balance BTCZ');
+      return balance;
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to get balance', e, stackTrace);
+      throw ServerFailure(
+        message: 'Failed to get balance: ${e.toString()}',
+        code: 'BALANCE_FETCH_ERROR',
       );
-
-      if (response.data['error'] != null) {
-        throw ServerFailure(
-          message: 'Server returned error: ${response.data['error']}',
-          code: 'SERVER_ERROR',
-        );
-      }
-
-      final balance = response.data['result']['confirmed'] as int;
-      return balance / 100000000; // Convert satoshis to BTCZ
-    });
+    }
   }
 
   @override
   Future<List<String>> getTransactions(String address) async {
-    return _executeWithRetry(() async {
-      final response = await dio.post(
-        'https://$currentServer',
-        data: {
-          'method': 'blockchain.address.get_history',
-          'params': [address],
-          'id': 1,
-        },
-      );
-
-      if (response.data['error'] != null) {
-        throw ServerFailure(
-          message: 'Server returned error: ${response.data['error']}',
-          code: 'SERVER_ERROR',
-        );
-      }
-
-      final transactions = (response.data['result'] as List)
-          .map((tx) => tx['tx_hash'] as String)
-          .toList();
-
+    try {
+      WalletLogger.debug('Getting transaction history for address: $address');
+      final history = await electrumService.getHistory(address);
+      final transactions = history.map((tx) => tx['tx_hash'] as String).toList();
+      WalletLogger.debug('Retrieved ${transactions.length} transactions');
       return transactions;
-    });
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to get transactions', e, stackTrace);
+      throw ServerFailure(
+        message: 'Failed to get transactions: ${e.toString()}',
+        code: 'TRANSACTION_HISTORY_ERROR',
+      );
+    }
   }
 
   @override
   Future<void> broadcastTransaction(String rawTransaction) async {
-    return _executeWithRetry(() async {
-      final response = await dio.post(
-        'https://$currentServer',
-        data: {
-          'method': 'blockchain.transaction.broadcast',
-          'params': [rawTransaction],
-          'id': 1,
-        },
+    try {
+      WalletLogger.debug('Broadcasting transaction');
+      await electrumService.broadcastTransaction(rawTransaction);
+      WalletLogger.debug('Transaction broadcast successful');
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to broadcast transaction', e, stackTrace);
+      throw ServerFailure(
+        message: 'Failed to broadcast transaction: ${e.toString()}',
+        code: 'BROADCAST_ERROR',
       );
-
-      if (response.data['error'] != null) {
-        throw ServerFailure(
-          message: 'Failed to broadcast transaction: ${response.data['error']}',
-          code: 'BROADCAST_ERROR',
-        );
-      }
-    });
+    }
   }
 }

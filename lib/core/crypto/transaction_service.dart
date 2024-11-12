@@ -52,6 +52,7 @@ class TransactionService {
         fromAddress,
         privateKeyWIF,
         fee ?? 0.0001,
+        electrumService, // Pass electrumService for current height
       );
 
       // Serialize for preview

@@ -32,16 +32,129 @@ class TransactionScript {
   }
 
   static Uint8List createScriptSig(Uint8List signature, Uint8List publicKey) {
-    final scriptSig = BytesBuilder();
+    try {
+      final scriptSig = BytesBuilder();
 
-    // Push signature
-    scriptSig.add(TransactionUtils.writeCompactSize(signature.length));
-    scriptSig.add(signature);
+      // Add signature length and signature
+      scriptSig.addByte(signature.length);
+      scriptSig.add(signature);
 
-    // Push public key
-    scriptSig.add(TransactionUtils.writeCompactSize(publicKey.length));
-    scriptSig.add(publicKey);
+      // Add public key length and public key
+      scriptSig.addByte(publicKey.length);
+      scriptSig.add(publicKey);
 
-    return scriptSig.toBytes();
+      return scriptSig.toBytes();
+    } catch (e) {
+      throw CryptoFailure(
+        message: 'Failed to create scriptSig: ${e.toString()}',
+        code: 'SCRIPTSIG_ERROR',
+      );
+    }
+  }
+
+  static Uint8List getScriptPubKeyFromAddress(String address) {
+    try {
+      final decoded = bs58check.decode(address);
+      if (decoded.length < 2) {
+        throw CryptoFailure(
+          message: 'Invalid address length',
+          code: 'INVALID_ADDRESS',
+        );
+      }
+
+      // Check version bytes for BitcoinZ t-address (0x1CB8)
+      if (decoded[0] != 0x1C || decoded[1] != 0xB8) {
+        throw CryptoFailure(
+          message: 'Invalid address version',
+          code: 'INVALID_ADDRESS_VERSION',
+        );
+      }
+
+      final pubKeyHash = decoded.sublist(2);
+      if (pubKeyHash.length != 20) {
+        throw CryptoFailure(
+          message: 'Invalid public key hash length',
+          code: 'INVALID_PUBKEY_HASH',
+        );
+      }
+
+      return createP2PKHScript(Uint8List.fromList(pubKeyHash));
+    } catch (e) {
+      throw CryptoFailure(
+        message: 'Failed to get scriptPubKey from address: ${e.toString()}',
+        code: 'SCRIPTPUBKEY_ERROR',
+      );
+    }
+  }
+
+  static Uint8List createP2PKHScript(Uint8List pubKeyHash) {
+    if (pubKeyHash.length != 20) {
+      throw CryptoFailure(
+        message: 'Public key hash must be 20 bytes',
+        code: 'INVALID_PUBKEY_HASH_LENGTH',
+      );
+    }
+
+    final script = BytesBuilder();
+    script.addByte(0x76); // OP_DUP
+    script.addByte(0xa9); // OP_HASH160
+    script.addByte(0x14); // Push 20 bytes
+    script.add(pubKeyHash);
+    script.addByte(0x88); // OP_EQUALVERIFY
+    script.addByte(0xac); // OP_CHECKSIG
+    return script.toBytes();
+  }
+
+  static Uint8List createRedeemScript(Uint8List publicKey) {
+    final script = BytesBuilder();
+    script.addByte(publicKey.length);
+    script.add(publicKey);
+    script.addByte(0xac); // OP_CHECKSIG
+    return script.toBytes();
+  }
+
+  static Uint8List createSignatureScript(Uint8List signature, Uint8List publicKey) {
+    final script = BytesBuilder();
+
+    // Add signature with length prefix
+    script.addByte(signature.length);
+    script.add(signature);
+
+    // Add public key with length prefix
+    script.addByte(publicKey.length);
+    script.add(publicKey);
+
+    return script.toBytes();
+  }
+
+  static bool verifyScript(Uint8List scriptSig, Uint8List scriptPubKey) {
+    try {
+      // Verify script lengths
+      if (scriptSig.isEmpty || scriptPubKey.isEmpty) {
+        return false;
+      }
+
+      // Extract signature and public key from scriptSig
+      var offset = 0;
+      final sigLength = scriptSig[offset++];
+      final signature = scriptSig.sublist(offset, offset + sigLength);
+      offset += sigLength;
+      final pubKeyLength = scriptSig[offset++];
+      final publicKey = scriptSig.sublist(offset, offset + pubKeyLength);
+
+      // Verify signature length
+      if (signature.length < 70 || signature.length > 73) {
+        return false;
+      }
+
+      // Verify public key length (compressed)
+      if (publicKey.length != 33) {
+        return false;
+      }
+
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 }

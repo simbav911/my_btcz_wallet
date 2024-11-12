@@ -2,8 +2,10 @@ import 'dart:typed_data';
 import 'package:dartz/dartz.dart';
 import 'package:hex/hex.dart';
 import 'package:my_btcz_wallet/core/crypto/crypto_service.dart';
+import 'package:my_btcz_wallet/core/crypto/transaction_builder.dart';
 import 'package:my_btcz_wallet/core/error/failures.dart';
 import 'package:my_btcz_wallet/core/utils/logger.dart';
+import 'package:my_btcz_wallet/core/network/electrum_service.dart';
 import 'package:my_btcz_wallet/data/datasources/wallet_local_data_source.dart';
 import 'package:my_btcz_wallet/data/datasources/wallet_remote_data_source.dart';
 import 'package:my_btcz_wallet/data/models/wallet_model.dart';
@@ -15,11 +17,13 @@ class WalletRepositoryImpl implements WalletRepository {
   final WalletLocalDataSource localDataSource;
   final WalletRemoteDataSource remoteDataSource;
   final CryptoService cryptoService;
+  final ElectrumService electrumService;
 
   WalletRepositoryImpl({
     required this.localDataSource,
     required this.remoteDataSource,
     required this.cryptoService,
+    required this.electrumService,
   });
 
   @override
@@ -280,6 +284,46 @@ class WalletRepositoryImpl implements WalletRepository {
       return Left(WalletFailure(
         message: 'Failed to backup wallet: ${e.toString()}',
         code: 'BACKUP_ERROR',
+      ));
+    }
+  }
+
+  @override
+  Future<Either<Failure, String>> sendTransaction({
+    required String fromAddress,
+    required String toAddress,
+    required double amount,
+    required String privateKeyWIF,
+    double fee = 0.0001,
+  }) async {
+    try {
+      WalletLogger.info('Initiating transaction from $fromAddress to $toAddress');
+      
+      // Get unspent outputs
+      final unspentOutputs = await electrumService.getUnspentOutputs(fromAddress);
+      WalletLogger.debug('Retrieved ${unspentOutputs.length} unspent outputs');
+
+      // Create and sign transaction
+      final txData = await TransactionBuilder.createAndSignTransaction(
+        unspentOutputs,
+        toAddress,
+        amount,
+        fromAddress,
+        privateKeyWIF,
+        fee,
+        electrumService,
+      );
+
+      // Broadcast transaction
+      final txId = await electrumService.broadcastTransaction(txData['hex']);
+      WalletLogger.info('Transaction broadcasted successfully with txId: $txId');
+
+      return Right(txId);
+    } catch (e, stackTrace) {
+      WalletLogger.error('Failed to send transaction', e, stackTrace);
+      return Left(TransactionFailure(
+        message: 'Failed to send transaction: ${e.toString()}',
+        code: 'SEND_TRANSACTION_ERROR',
       ));
     }
   }
