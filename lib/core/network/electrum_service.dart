@@ -305,10 +305,10 @@ class ElectrumService {
   Future<void> _initConnectivity() async {
     try {
       final result = await Connectivity().checkConnectivity();
-      _updateConnectionStatus(result);
+      _updateConnectionStatus(result.first);
 
       _connectivitySubscription = Connectivity().onConnectivityChanged.listen((result) {
-        _updateConnectionStatus(result);
+        _updateConnectionStatus(result.first);
       });
     } catch (e) {
       WalletLogger.error('Failed to initialize connectivity', e);
